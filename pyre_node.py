@@ -150,153 +150,48 @@ class PyreNode(object):
                 await peer.send(msg)
 
             logger.debug("Node is joining group {0}".format(groupname))
+    
+    async def leave(self, groupname):
+        grp = self.own_groups.get(groupname)
+        if grp:
+            # Only send if we're actually in group
+            msg = ZreMsg(ZreMsg.LEAVE)
+            msg.set_group(groupname)
+            self.status += 1
+            msg.set_status(self.status)
 
-    # Here we handle the different control messages from the front-end
-    def recv_api(self):
-        request = self._pipe.recv_multipart()
-        command = request.pop(0).decode('UTF-8')
-        if command == "UUID":
-            self._pipe.send(self.identity.bytes)
-        elif command == "NAME":
-            self._pipe.send_unicode(self.name)
-        elif command == "SET NAME":
-            self.name = request.pop(0).decode('UTF-8')
-        elif command == "SET HEADER":
-            header_name = request.pop(0).decode('UTF-8')
-            header_value = request.pop(0).decode('UTF-8')
-            self.headers.update({header_name: header_value})
-        elif command == "SET VERBOSE":
-            self.verbose = True
-        elif command == "SET PORT":
-            self.beacon_port = int(request.pop(0))
-        elif command == "SET INTERVAL":
-            self.interval = int(request.pop(0))
-        #elif command == "SET ENDPOINT":
-            # TODO: gossip start and endpoint setting
-        # TODO: GOSSIP BIND, GOSSIP CONNECT
-        #elif command == "BIND":
-        #    # TODO: Needs a wait-signal
-        #    endpoint = request.pop(0).decode('UTF-8')
-        #    self.bind(endpoint)
-        #elif command == "CONNECT":
-        #    # TODO: Needs a wait-signal
-        #    endpoint = request.pop(0).decode('UTF-8')
-        #    self.connect(endpoint)
-        elif command == "START":
-            # zsock_signal (self->pipe, zyre_node_start (self));
-            self.start()
-            self._pipe.signal()
-        elif command == "STOP":
-            # zsock_signal (self->pipe, zyre_node_stop (self));
-            self.stop()
-            self._pipe.signal()
-        elif command == "WHISPER":
-            # Get peer to send message to
-            peer_id = uuid.UUID(bytes=request.pop(0))
-            # Send frame on out to peer's mailbox, drop message
-            # if peer doesn't exist (may have been destroyed)
-            if self.peers.get(peer_id):
-                msg = ZreMsg(ZreMsg.WHISPER)
-                msg.set_address(peer_id)
-                msg.content = request
-                self.peers[peer_id].send(msg)
-        elif command == "SHOUT":
-            # Get group to send message to
-            grpname = request.pop(0).decode('UTF-8')
-            msg = ZreMsg(ZreMsg.SHOUT)
-            msg.set_group(grpname)
-            msg.content = request  # request may contain multipart message
+            for peer in self.peers.values():
+                await peer.send(msg)
 
-            if self.peer_groups.get(grpname):
-                self.peer_groups[grpname].send(msg)
+            self.own_groups.pop(groupname)
 
-            else:
-                logger.warning("Group {0} not found.".format(grpname))
+            logger.debug("Node is leaving group {0}".format(groupname))
 
-        elif command == "JOIN":
-            grpname = request.pop(0).decode('UTF-8')
-            grp = self.own_groups.get(grpname)
-            if not grp:
-                # Only send if we're not already in group
-                grp = PyreGroup(grpname)
-                self.own_groups[grpname] = grp
-                msg = ZreMsg(ZreMsg.JOIN)
-                msg.set_group(grpname)
-                self.status += 1
-                msg.set_status(self.status)
+    async def shout(self, groupname, content):
+        # Get group to send message to
+        msg = ZreMsg(ZreMsg.SHOUT)
+        msg.set_group(groupname)
+        msg.content = content  # request may contain multipart message
 
-                for peer in self.peers.values():
-                    peer.send(msg)
-
-                logger.debug("Node is joining group {0}".format(grpname))
-
-        elif command == "LEAVE":
-            grpname = request.pop(0).decode('UTF-8')
-            grp = self.own_groups.get(grpname)
-            if grp:
-                # Only send if we're actually in group
-                msg = ZreMsg(ZreMsg.LEAVE)
-                msg.set_group(grpname)
-                self.status += 1
-                msg.set_status(self.status)
-
-                for peer in self.peers.values():
-                    peer.send(msg)
-
-                self.own_groups.pop(grpname)
-
-                logger.debug("Node is leaving group {0}".format(grpname))
-        elif command == "PEERS":
-            self._pipe.send_pyobj(list(self.peers.keys()))
-        elif command == "PEERS BY GROUP":
-            grpname = request.pop(0).decode('UTF-8')
-            grp = self.require_peer_group(grpname)
-            self._pipe.send_pyobj(list(grp.peers.keys()))
-        elif command == "ENDPOINT":
-            self._pipe.send_unicode(self.endpoint)
-        elif command == "PEER NAME":
-            id = uuid.UUID(bytes=request.pop(0))
-            peer = self.peers.get(id)
-            if peer:
-                self._pipe.send_unicode("%s" %peer.get_name())
-            else:
-                self._pipe.send_unicode("")
-        elif command == "PEER ENDPOINT":
-            id = uuid.UUID(bytes=request.pop(0))
-            peer = self.peers.get(id)
-            if peer:
-                self._pipe.send_unicode("%s" %peer.get_endpoint())
-            else:
-                self._pipe.send_unicode("")
-        elif command == "PEER HEADER":
-            id = uuid.UUID(bytes=request.pop(0))
-            key = request.pop(0).decode('UTF-8')
-            peer = self.peers.get(id)
-            if not peer:
-                self._pipe.send_unicode("")
-            else:
-                self._pipe.send_unicode(peer.get_header(key))
-        elif command == "PEER HEADERS":
-            id = uuid.UUID(bytes=request.pop(0))
-            peer = self.peers.get(id)
-            if not peer:
-                self._pipe.send_unicode("")
-            else:
-                self._pipe.send_pyobj(peer.get_headers())
-        elif command == "PEER GROUPS":
-            self._pipe.send_pyobj(list(self.peer_groups.keys()))
-        elif command == "OWN GROUPS":
-            self._pipe.send_pyobj(list(self.own_groups.keys()))
-        elif command == "DUMP":
-            # TODO: zyre_node_dump (self);
-            pass
-        elif command == "$TERM":
-            # this is often not printed if program terminates
-            logger.debug("Pyre node: shutting down")
-            self._terminated = True
-
+        if self.peer_groups.get(groupname):
+            await self.peer_groups[groupname].send(msg)
         else:
-            logger.warning("Unkown Node API command: {0}".format(command))
+            logger.warning("Group {0} not found.".format(groupname))
+    
+    async def whisper(self, peer_id, content):
+        # Send frame on out to peer's mailbox, drop message
+        # if peer doesn't exist (may have been destroyed)
+        if self.peers.get(peer_id):
+            print("hello?")
+            msg = ZreMsg(ZreMsg.WHISPER)
+            msg.set_address(peer_id)
+            msg.content = content
+            await self.peers[peer_id].send(msg)
+        else:
+            print("what?")
+    
+    def get_peers(self):
+        return self.peers.keys()
 
     async def purge_peer(self, peer, endpoint):
         if (peer.get_endpoint() == endpoint):
@@ -375,7 +270,7 @@ class PyreNode(object):
         logger.debug("({0}) JOIN name={1} group={2}".format(self.name, peer.get_name(), groupname))
         return grp
 
-    def leave_peer_group(self, peer, groupname):
+    async def leave_peer_group(self, peer, groupname):
         # Tell the caller about the peer joined group
         messages = [
             "LEAVE",
@@ -383,7 +278,7 @@ class PyreNode(object):
             peer.get_name(),
             groupname
         ]
-        self.receiver(messages)
+        await self.receiver(messages)
         # Now remove the peer from the group
         grp = self.require_peer_group(groupname)
         grp.leave(peer)
@@ -454,7 +349,7 @@ class PyreNode(object):
                     peer.get_name(),
                     zmsg.content
                 ]
-                self.receiver(messages)
+                await self.receiver(messages)
             elif zmsg.id == ZreMsg.SHOUT:
                 # Pass up to caller API as WHISPER event
                 messages = [
@@ -464,15 +359,14 @@ class PyreNode(object):
                     zmsg.get_group(),
                     zmsg.content
                 ]
-                self.receiver(messages)
+                await self.receiver(messages)
             elif zmsg.id == ZreMsg.PING:
                 peer.send(ZreMsg(id=ZreMsg.PING_OK))
             elif zmsg.id == ZreMsg.JOIN:
                 await self.join_peer_group(peer, zmsg.get_group())
                 assert(zmsg.get_status() == peer.get_status())
             elif zmsg.id == ZreMsg.LEAVE:
-                #self.leave_peer_group(zmsg.get_group())
-                self.leave_peer_group(peer, zmsg.get_group())
+                await self.leave_peer_group(peer, zmsg.get_group())
                 assert(zmsg.get_status() == peer.get_status())
             # Activity from peer resets peer timers
             peer.refresh()

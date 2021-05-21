@@ -66,10 +66,8 @@ class ZreMsg(object):
     #def __del__(self):
 
     async def recv(self, input_socket):
-        print("zre_msg recv")
         # If we're reading from a ROUTER socket, get address
         frames = await input_socket.recv_multipart()
-        print("ugh")
         if input_socket.type == zmq.ROUTER:
             self.address = frames.pop(0)
             # we drop the first byte: TODO ref!

@@ -1,17 +1,7 @@
-import zmq
-import time
-import struct
-import socket
 import uuid
 import logging
-import sys
 
 # local modules
-# from . import __version_info__
-# from . import zbeacon
-# from . import zhelper
-# from zactor import ZActor
-# from zsocket import ZSocket
 from pyre_node import PyreNode
 from pyre_event import PyreEvent
 
@@ -107,81 +97,37 @@ class Pyre(object):
         specify which one you want to use, or strange things can happen."""
         logging.debug("set_interface not implemented") #TODO
 
-    def start(self):
-        """Start node, after setting header values. When you start a node it
-        begins discovery and connection. Returns 0 if OK, -1 if it wasn't
-        possible to start the node."""
-        self.node.start()
-
-    def stop(self):
-        """Stop node; this signals to other peers that this node will go away.
-        This is polite; however you can also just destroy the node without
-        stopping it."""
-        self.node.stop()
-
     async def join(self, groupname):
         """Join a named group; after joining a group you can send messages to
         the group and all Zyre nodes in that group will receive them."""
-        print("JOINING")
         await self.node.join(groupname)
 
-    def leave(self, group):
+    async def leave(self, groupname):
         """Leave a group"""
-        self.actor.send_unicode("LEAVE", flags=zmq.SNDMORE)
-        self.actor.send_unicode(group)
+        await self.node.leave(groupname)
 
     # Send message to single peer; peer ID is first frame in message
-    def whisper(self, peer, msg_p):
+    async def whisper(self, peer, content):
         """Send message to single peer, specified as a UUID string
         Destroys message after sending"""
-        self.actor.send_unicode("WHISPER", flags=zmq.SNDMORE)
-        self.actor.send(peer.bytes, flags=zmq.SNDMORE)
-        if isinstance(msg_p, list):
-            self.actor.send_multipart(msg_p)
-        else:
-            self.actor.send(msg_p)
+        await self.node.whisper(peer, content)
 
-    def shout(self, group, msg_p):
+    async def shout(self, groupname, content):
         """Send message to a named group
         Destroys message after sending"""
-        self.actor.send_unicode("SHOUT", flags=zmq.SNDMORE)
-        self.actor.send_unicode(group, flags=zmq.SNDMORE)
-        if isinstance(msg_p, list):
-            self.actor.send_multipart(msg_p)
-        else:
-            self.actor.send(msg_p)
+        await self.node.shout(groupname, content)
 
-    # TODO: checks args from zyre
-    def whispers(self, peer, format, *args):
-        """Send formatted string to a single peer specified as UUID string"""
-        self.actor.send_unicode("WHISPER", flags=zmq.SNDMORE)
-        self.actor.send(peer.bytes, flags=zmq.SNDMORE)
-        self.actor.send_unicode(format)
-
-    def shouts(self, group, format, *args):
-        """Send formatted string to a named group"""
-        self.actor.send_unicode("SHOUT", flags=zmq.SNDMORE)
-        self.actor.send_unicode(group, flags=zmq.SNDMORE)
-        self.actor.send_unicode(format)
-
-    def peers(self):
+    def get_peers(self):
         """Return list of current peer ids."""
-        self.actor.send_unicode("PEERS")
-        peers = self.actor.recv_pyobj()
-        return peers
+        return self.node.get_peers()
 
-    def peers_by_group(self, group):
+    def peers_by_group(self, groupname):
         """Return list of current peer ids."""
-        self.actor.send_unicode("PEERS BY GROUP", flags=zmq.SNDMORE)
-        self.actor.send_unicode(group)
-        peers_by_group = self.actor.recv_pyobj()
-        return peers_by_group
+        return list(self.node.require_peer_group(groupname).peers.keys())
 
     def endpoint(self):
         """Return own endpoint"""
-        self.actor.send_unicode("ENDPOINT")
-        endpoint = self.actor.recv_unicode()
-        return endpoint
+        return self.node.endpoint
 
     def recent_events(self):
         """Iterator that yields recent `PyreEvent`s"""
@@ -193,52 +139,27 @@ class Pyre(object):
         while True:
             yield PyreEvent(self)
 
-    # --------------------------------------------------------------------------
-    # Return the name of a connected peer. Caller owns the
-    # string.
-    # DEPRECATED: This is dropped in Zyre api. You receive names through events
-    def get_peer_name(self, peer):
-        logger.warning("get_peer_name() is deprecated, will be removed")
-        self.actor.send_unicode("PEER NAME", zmq.SNDMORE)
-        self.actor.send(peer.bytes)
-        name = self.actor.recv_unicode()
-        return name
-
     def peer_address(self, peer):
         """Return the endpoint of a connected peer."""
-        self.actor.send_unicode("PEER ENDPOINT", zmq.SNDMORE)
-        self.actor.send(peer.bytes)
-        adr = self.actor.recv_unicode()
-        return adr
+        return self.node.peers.get(peer).get_endpoint()
 
     def peer_header_value(self, peer, name):
         """Return the value of a header of a conected peer.
         Returns null if peer or key doesn't exist."""
-        self.actor.send_unicode("PEER HEADER", zmq.SNDMORE)
-        self.actor.send(peer.bytes, zmq.SNDMORE)
-        self.actor.send_unicode(name)
-        value = self.actor.recv_unicode()
-        return value
+        return self.node.peers.get(peer).get_header(name)
 
     def peer_headers(self, peer):
         """Return the value of a header of a conected peer.
         Returns null if peer or key doesn't exist."""
-        self.actor.send_unicode("PEER HEADERS", zmq.SNDMORE)
-        self.actor.send(peer.bytes)
-        headers = self.actor.recv_pyobj()
-        return headers
+        return self.node.peers.get(peer).get_headers()
 
     def own_groups(self):
         """Return list of currently joined groups."""
-        self.actor.send_unicode("OWN GROUPS");
-        groups = self.actor.recv_pyobj()
-        return groups
+        return list(self.node.own_groups.keys())
 
     def peer_groups(self):
         """Return list of groups known through connected peers."""
-        self.actor.send_unicode("PEER GROUPS")
-        groups = self.actor.recv_pyobj()
-        return groups
+        return list(self.node.peer_groups.keys())
 
     # Return node socket, for direct polling of socket
     def socket(self):
@@ -261,11 +182,37 @@ class Pyre(object):
 async def receiver(messages):
     print(messages)
 
+async def user(pyre):
+    print("start")
+    await asyncio.sleep(1)
+    await pyre.join("blah")
+    await asyncio.sleep(1)
+    await pyre.shout("blah", b"look at this shout message")
+    await asyncio.sleep(1)
+    peers = pyre.get_peers()
+    peer = list(peers)[0]
+    print(pyre.peer_address(peer))
+    await pyre.whisper(list(peers)[0], b"look at this whisper message")
+    await asyncio.sleep(1)
+    await pyre.leave("blah")
+    print("done")
+
 async def main():
     loop = asyncio.get_running_loop()
     with Pyre(receiver) as pyre:
-        await pyre.join("blah")
-        await pyre.run(loop)
+        # this seems like the simplest syntax to use for now
+        # the engine needs to run
+        # but we still want to perform our own things as well
+
+        tasks = [
+            user(pyre),
+            pyre.run(loop)
+        ]
+
+        # maybe we don't need gather
+        # could use wait to close down gracefully when
+        # user tasks are complete
+        await asyncio.gather(*tasks)
 
 if __name__ == '__main__':
     # Create a StreamHandler for debugging
