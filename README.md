@@ -6,4 +6,4 @@ I am taking the current pyre code base and making it run with asyncio.
 
 Maintaining all copyrights as I am reusing alot of code.
 
-The biggest changes revolve around removing zactor and favor of asyncio.
+Check the wiki.
