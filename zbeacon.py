@@ -137,7 +137,6 @@ class ZAsyncBeacon(object):
                     self.udpsock.bind((str(self.broadcast_address),
                                        self.port_nbr))
                 else:
-                    print(self.port_nbr)
                     self.udpsock.bind(("", self.port_nbr))
 
                 logger.debug("Set up a broadcast beacon to {0}:{1}".format(self.broadcast_address, self.port_nbr))
@@ -216,6 +215,9 @@ class ZAsyncBeacon(object):
     def get_address(self):
         return self.address
     
+    def get_socket(self):
+        return self.udpsock
+    
     def send_term(self):
         self.terminated = True
 
@@ -240,19 +242,3 @@ class ZAsyncBeacon(object):
             logger.debug("Network seems gone, exiting zbeacon")
             self.terminated = True
 
-    async def run(self, loop, receiver, data):
-        print("running beacon")
-
-        print("create async beacon handler")
-        # this will receive asynchronously on its own
-        _transport, _protocol = await loop.create_datagram_endpoint(
-                lambda: receiver,
-                sock=self.udpsock)
-        
-        print("running beacon")
-        while not self.terminated:
-            # keep looping
-            # send the beacon at interval
-            await self.send_beacon(_transport, data)
-            # sleep interval
-            await asyncio.sleep(1.0)

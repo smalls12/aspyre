@@ -17,7 +17,7 @@ import zmq.asyncio
 from zmq.asyncio import Context
 
 # hmm ?
-asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+# asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 BEACON_VERSION = 1
 ZRE_DISCOVERY_PORT = 5670
@@ -77,12 +77,12 @@ class PyreNode(object):
         self.own_groups = {}                        # Groups that we are in
         self.headers = {}                           # Our header values
         # TODO: gossip stuff
-        self.start()
+        # self.start()
 
     # def __del__(self):
         # destroy beacon
 
-    def start(self):
+    async def start(self):
         # TODO: If application didn't bind explicitly, we grab an ephemeral port
         # on all available network interfaces. This is orthogonal to
         # beaconing, since we can connect to other peers and they will
@@ -120,15 +120,13 @@ class PyreNode(object):
 
             self.endpoint = "tcp://%s:%d" %(hostname, self.port)            
 
-    def stop(self):
+    async def stop(self):
         logger.debug("Pyre node: stopping beacon")
         if self.beacon:
-            if self.beacon.is_running:
-                self.transmit = struct.pack('cccb16sH', b'Z',b'R',b'E',
-                            BEACON_VERSION, self.identity.bytes,
-                            socket.htons(0))
-                # Give time for beacon to go out
-                time.sleep(0.001)
+            self.transmit = struct.pack('cccb16sH', b'Z',b'R',b'E',
+                        BEACON_VERSION, self.identity.bytes,
+                        socket.htons(0))
+            await asyncio.sleep(1.0)
             self.beacon = None
         self.beacon_port = 0
 
@@ -182,13 +180,10 @@ class PyreNode(object):
         # Send frame on out to peer's mailbox, drop message
         # if peer doesn't exist (may have been destroyed)
         if self.peers.get(peer_id):
-            print("hello?")
             msg = ZreMsg(ZreMsg.WHISPER)
             msg.set_address(peer_id)
             msg.content = content
             await self.peers[peer_id].send(msg)
-        else:
-            print("what?")
     
     def get_peers(self):
         return self.peers.keys()
@@ -287,7 +282,6 @@ class PyreNode(object):
     # Here we handle messages coming from other peers
     async def run_recv_peer(self):
         while not self._terminated:
-            print("run_recv_peer start")
             zmsg = ZreMsg()
             await zmsg.recv(self.inbox)
             #msgs = self.inbox.recv_multipart()
@@ -370,7 +364,6 @@ class PyreNode(object):
                 assert(zmsg.get_status() == peer.get_status())
             # Activity from peer resets peer timers
             peer.refresh()
-            print("run_recv_peer done")
 
     async def recv_beacon(self, frame, addr):
         #  If filter is set, check that beacon matches it
@@ -449,25 +442,26 @@ class PyreNode(object):
             # sleep interval
             await asyncio.sleep(REAP_INTERVAL)
             
-    async def run_beacon(self, loop):
-        await self.beacon.run(loop, self.beacon_receiver, self.transmit)
+    async def run_beacon(self):
+        print("running beacon")
+        # this will receive asynchronously on its own
+        _transport, _protocol = await asyncio.get_event_loop().create_datagram_endpoint(
+                lambda: self.beacon_receiver,
+                sock=self.beacon.get_socket())
+        
+        while not self._terminated:
+            # keep looping
+            # send the beacon at interval
+            await self.beacon.send_beacon(_transport, self.transmit)
+            # sleep interval
+            await asyncio.sleep(1.0)
     
-async def main():
-    loop = asyncio.get_event_loop()
-
-    print("create node")
-    _node = PyreNode()
-    _receiver = PyreBeaconReceiver(_node.recv_beacon)
-    _node.start()
-
-    tasks = [
-        _node.run_beacon(loop, _receiver),
-        _node.run_reaper(),
-        _node.run_recv_peer()
-    ]
+    async def run(self):
+        tasks = [
+            self.run_beacon(),
+            self.run_reaper(),
+            self.run_recv_peer()
+        ]
+        
+        await asyncio.gather(*tasks)
     
-    print("run beacon")
-    await asyncio.gather(*tasks)
-
-if __name__ == '__main__':
-    asyncio.run(main())

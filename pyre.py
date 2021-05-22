@@ -34,19 +34,16 @@ class Pyre(object):
             ctx = zmq.Context()
         self._ctx = ctx
         self._uuid = None
+        self._receiver = receiver
         self._name = name
         self.verbose = True
-        self.node = PyreNode(receiver)
-
-        # Send name, if any, to node backend
-        if (self._name):
-            self.node.name = self._name        
-
-    def __enter__(self):
+                
+    async def __aenter__(self):
+        await self.start(self._receiver)
         return self
     
-    def __exit__(self, type, value, traceback):
-        pass
+    async def __aexit__(self, type, value, traceback):
+        await self.stop()
 
     #def __del__(self):
         # We need to explicitly destroy the actor
@@ -54,7 +51,7 @@ class Pyre(object):
         #self.actor.destroy()
 
     def __bool__(self):
-        "Determine whether the object is valid by converting to boolean" # Python 3
+        "Determine whether the object is valid by converting to boolean"
         return True  #TODO
 
     def uuid(self):
@@ -96,6 +93,24 @@ class Pyre(object):
         choose an interface for you. On boxes with several interfaces you should
         specify which one you want to use, or strange things can happen."""
         logging.debug("set_interface not implemented") #TODO
+    
+    async def start(self, receiver):
+        """Start node, after setting header values. When you start a node it
+        begins discovery and connection. Returns 0 if OK, -1 if it wasn't
+        possible to start the node."""
+        self.node = PyreNode(receiver)
+
+        # Send name, if any, to node backend
+        if (self._name):
+            self.node.name = self._name
+
+        await self.node.start()
+
+    async def stop(self):
+        """Stop node; this signals to other peers that this node will go away.
+        This is polite; however you can also just destroy the node without
+        stopping it."""
+        await self.node.stop()
 
     async def join(self, groupname):
         """Join a named group; after joining a group you can send messages to
@@ -166,60 +181,9 @@ class Pyre(object):
         """Return socket for talking to the Zyre node, for polling"""
         return self.inbox
     
-    async def run(self, loop):
-        tasks = [
-            self.node.run_beacon(loop),
-            self.node.run_reaper(),
-            self.node.run_recv_peer()
-        ]
-        
-        await asyncio.gather(*tasks)
+    async def run(self):       
+        await self.node.run()
 
     @staticmethod
     def version():
         return __version_info__
-
-async def receiver(messages):
-    print(messages)
-
-async def user(pyre):
-    print("start")
-    await asyncio.sleep(1)
-    await pyre.join("blah")
-    await asyncio.sleep(1)
-    await pyre.shout("blah", b"look at this shout message")
-    await asyncio.sleep(1)
-    peers = pyre.get_peers()
-    peer = list(peers)[0]
-    print(pyre.peer_address(peer))
-    await pyre.whisper(list(peers)[0], b"look at this whisper message")
-    await asyncio.sleep(1)
-    await pyre.leave("blah")
-    print("done")
-
-async def main():
-    loop = asyncio.get_running_loop()
-    with Pyre(receiver) as pyre:
-        # this seems like the simplest syntax to use for now
-        # the engine needs to run
-        # but we still want to perform our own things as well
-
-        tasks = [
-            user(pyre),
-            pyre.run(loop)
-        ]
-
-        # maybe we don't need gather
-        # could use wait to close down gracefully when
-        # user tasks are complete
-        await asyncio.gather(*tasks)
-
-if __name__ == '__main__':
-    # Create a StreamHandler for debugging
-    logger = logging.getLogger("pyre")
-    logger.setLevel(logging.DEBUG)
-    # i.e. logging.DEBUG, logging.WARNING
-    logger.addHandler(logging.StreamHandler())
-    logger.propagate = False
-
-    asyncio.run(main())
