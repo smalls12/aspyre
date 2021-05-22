@@ -47,7 +47,6 @@ class Pyre(object):
         await self.stop()
 
     def __del__(self):
-        print("__del__")
         self._inbox.close()        
 
     def __bool__(self):

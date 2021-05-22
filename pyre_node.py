@@ -11,6 +11,8 @@ from zre_msg import ZreMsg
 from pyre_peer import PyrePeer
 from pyre_group import PyreGroup
 
+import json
+
 import asyncio
 
 import zmq.asyncio
@@ -83,7 +85,6 @@ class PyreNode(object):
         # self.start()
 
     def __del__(self):
-        print("__del__")
         self._outbox.close()
 
     async def start(self):
@@ -243,13 +244,11 @@ class PyreNode(object):
     #  Remove a peer from our data structures
     async def remove_peer(self, peer):
         # Tell the calling application the peer has gone
-        messages = [
-            "EXIT",
+        await self._outbox.send_multipart([
+            "EXIT".encode('utf-8'),
             peer.get_identity().bytes,
-            peer.get_name()
-        ]
-        # await self.receiver(messages)
-        await self._outbox.send_multipart([b'EXIT'])
+            peer.get_name().encode('utf-8')
+        ])
         logger.debug("({0}) EXIT name={1}".format(peer, peer.get_endpoint()))
         # Remove peer from any groups we've got it in
         for grp in self.peer_groups.values():
@@ -272,27 +271,23 @@ class PyreNode(object):
         grp = self.require_peer_group(groupname)
         grp.join(peer)
         # Now tell the caller about the peer joined group
-        messages = [
-            "JOIN",
+        await self._outbox.send_multipart([
+            "JOIN".encode('utf-8'),
             peer.get_identity().bytes,
-            peer.get_name(),
-            groupname
-        ]
-        # await self.receiver(messages)
-        await self._outbox.send_multipart([b'JOIN'])
+            peer.get_name().encode('utf-8'),
+            groupname.encode('utf-8')
+        ])
         logger.debug("({0}) JOIN name={1} group={2}".format(self.name, peer.get_name(), groupname))
         return grp
 
     async def leave_peer_group(self, peer, groupname):
         # Tell the caller about the peer joined group
-        messages = [
-            "LEAVE",
+        await self._outbox.send_multipart([
+            "LEAVE".encode('utf-8'),
             peer.get_identity().bytes,
-            peer.get_name(),
-            groupname
-        ]
-        # await self.receiver(messages)
-        await self._outbox.send_multipart([b'LEAVE'])
+            peer.get_name().encode('utf-8'),
+            groupname.encode('utf-8')
+        ])
         # Now remove the peer from the group
         grp = self.require_peer_group(groupname)
         grp.leave(peer)
@@ -339,15 +334,13 @@ class PyreNode(object):
                 peer.set_headers(zmsg.get_headers())
 
                 # Now tell the caller about the peer
-                messages = [
-                    "ENTER",
+                await self._outbox.send_multipart([
+                    "ENTER".encode('utf-8'),
                     peer.get_identity().bytes,
-                    peer.get_name(),
-                    peer.get_headers(),
-                    peer.get_endpoint()
-                ]
-                # await self.receiver(messages)
-                await self._outbox.send_multipart([b'ENTER'])
+                    peer.get_name().encode('utf-8'),
+                    json.dumps(peer.get_headers()).encode('utf-8'),
+                    peer.get_endpoint().encode('utf-8')
+                ])
                 logger.debug("({0}) ENTER name={1} endpoint={2}".format(self.name, peer.get_name(), peer.get_endpoint()))
 
                 # Join peer to listed groups
@@ -357,25 +350,19 @@ class PyreNode(object):
                 peer.set_status(zmsg.get_status())
             elif zmsg.id == ZreMsg.WHISPER:
                 # Pass up to caller API as WHISPER event
-                messages = [
-                    "WHISPER",
+                await self._outbox.send_multipart([
+                    "WHISPER".encode('utf-8'),
                     peer.get_identity().bytes,
-                    peer.get_name(),
-                    zmsg.content
-                ]
-                # await self.receiver(messages)
-                await self._outbox.send_multipart([b'WHISPER'])
+                    peer.get_name().encode('utf-8')
+                ] + zmsg.content)
             elif zmsg.id == ZreMsg.SHOUT:
                 # Pass up to caller API as WHISPER event
-                messages = [
-                    "SHOUT",
+                await self._outbox.send_multipart([
+                    "SHOUT".encode('utf-8'),
                     peer.get_identity().bytes,
-                    peer.get_name(),
-                    zmsg.get_group(),
-                    zmsg.content
-                ]
-                # await self.receiver(messages)
-                await self._outbox.send_multipart([b'SHOUT'])
+                    peer.get_name().encode('utf-8'),
+                    zmsg.get_group().encode('utf-8')
+                ] + zmsg.content)
             elif zmsg.id == ZreMsg.PING:
                 peer.send(ZreMsg(id=ZreMsg.PING_OK))
             elif zmsg.id == ZreMsg.JOIN:
