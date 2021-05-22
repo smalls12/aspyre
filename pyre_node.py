@@ -46,7 +46,7 @@ class PyreNodeBeaconReceiver():
 
 class PyreNode(object):
 
-    def __init__(self, receiver, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         self._ctx = Context.instance()
 
         self._terminated = False                    # API shut us down
@@ -55,8 +55,6 @@ class PyreNode(object):
         self.interval = 0                           # Beacon interval 0=default
         self.beacon = None                          # Beacon actor
         self.beacon_receiver = None
-
-        self.receiver = receiver                    # user receiver
 
         self.transmit = None
         self.filter = b""
@@ -68,6 +66,7 @@ class PyreNode(object):
             self.inbox.setsockopt(zmq.ROUTER_HANDOVER, 1)
         except AttributeError as e:
             logging.warning("can't set ROUTER_HANDOVER, needs zmq version >=4.1 but installed is {0}".format(zmq.zmq_version()))
+        self._outbox = self._ctx.socket(zmq.PUSH)
         self.name = str(self.identity)[:6]          # Our public name (default=first 6 uuid chars)
         self.endpoint = ""                          # Our public endpoint
         self.port = 0                               # Our inbox port, if any
@@ -83,8 +82,9 @@ class PyreNode(object):
         # TODO: gossip stuff
         # self.start()
 
-    # def __del__(self):
-        # destroy beacon
+    def __del__(self):
+        print("__del__")
+        self._outbox.close()
 
     async def start(self):
         # TODO: If application didn't bind explicitly, we grab an ephemeral port
@@ -106,6 +106,8 @@ class PyreNode(object):
 
             #if self.interval:
             #   self.beacon.set_interval(self.interval)
+
+            self._outbox.bind("inproc://events")
 
             # Our hostname is provided by zbeacon
             self.port = self.inbox.bind_to_random_port("tcp://*")
@@ -139,6 +141,7 @@ class PyreNode(object):
                     BEACON_VERSION, self.identity.bytes,
                     socket.htons(0))
         await self.beacon.send_beacon(self.transport, self.transmit)
+        self._outbox.unbind("inproc://events")
             # self.beacon = None
         # self.beacon_port = 0
         
@@ -245,7 +248,8 @@ class PyreNode(object):
             peer.get_identity().bytes,
             peer.get_name()
         ]
-        await self.receiver(messages)
+        # await self.receiver(messages)
+        await self._outbox.send_multipart([b'EXIT'])
         logger.debug("({0}) EXIT name={1}".format(peer, peer.get_endpoint()))
         # Remove peer from any groups we've got it in
         for grp in self.peer_groups.values():
@@ -274,7 +278,8 @@ class PyreNode(object):
             peer.get_name(),
             groupname
         ]
-        await self.receiver(messages)
+        # await self.receiver(messages)
+        await self._outbox.send_multipart([b'JOIN'])
         logger.debug("({0}) JOIN name={1} group={2}".format(self.name, peer.get_name(), groupname))
         return grp
 
@@ -286,7 +291,8 @@ class PyreNode(object):
             peer.get_name(),
             groupname
         ]
-        await self.receiver(messages)
+        # await self.receiver(messages)
+        await self._outbox.send_multipart([b'LEAVE'])
         # Now remove the peer from the group
         grp = self.require_peer_group(groupname)
         grp.leave(peer)
@@ -340,7 +346,8 @@ class PyreNode(object):
                     peer.get_headers(),
                     peer.get_endpoint()
                 ]
-                await self.receiver(messages)
+                # await self.receiver(messages)
+                await self._outbox.send_multipart([b'ENTER'])
                 logger.debug("({0}) ENTER name={1} endpoint={2}".format(self.name, peer.get_name(), peer.get_endpoint()))
 
                 # Join peer to listed groups
@@ -356,7 +363,8 @@ class PyreNode(object):
                     peer.get_name(),
                     zmsg.content
                 ]
-                await self.receiver(messages)
+                # await self.receiver(messages)
+                await self._outbox.send_multipart([b'WHISPER'])
             elif zmsg.id == ZreMsg.SHOUT:
                 # Pass up to caller API as WHISPER event
                 messages = [
@@ -366,7 +374,8 @@ class PyreNode(object):
                     zmsg.get_group(),
                     zmsg.content
                 ]
-                await self.receiver(messages)
+                # await self.receiver(messages)
+                await self._outbox.send_multipart([b'SHOUT'])
             elif zmsg.id == ZreMsg.PING:
                 peer.send(ZreMsg(id=ZreMsg.PING_OK))
             elif zmsg.id == ZreMsg.JOIN:

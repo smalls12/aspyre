@@ -16,7 +16,7 @@ raw_input = input  # Python 3
 
 class Pyre(object):
 
-    def __init__(self, receiver, name=None, ctx=None, *args, **kwargs):
+    def __init__(self, name=None, ctx=None, *args, **kwargs):
         """Constructor, creates a new Zyre node. Note that until you start the
         node it is silent and invisible to other nodes on the network.
         The node name is provided to other nodes during discovery. If you
@@ -31,25 +31,24 @@ class Pyre(object):
         super(Pyre, self).__init__(*args, **kwargs)
         ctx = kwargs.get('ctx')
         if ctx == None:
-            ctx = zmq.Context()
+            ctx = Context.instance()
         self._ctx = ctx
         self._uuid = None
-        self._receiver = receiver
+        self._inbox = self._ctx.socket(zmq.PULL)
         self._name = name
         self.engine = None
         self.verbose = True
                 
     async def __aenter__(self):
-        await self.start(self._receiver)
+        await self.start()
         return self
     
     async def __aexit__(self, type, value, traceback):
         await self.stop()
 
-    #def __del__(self):
-        # We need to explicitly destroy the actor
-        # to make sure our node thread is stopped
-        #self.actor.destroy()
+    def __del__(self):
+        print("__del__")
+        self._inbox.close()        
 
     def __bool__(self):
         "Determine whether the object is valid by converting to boolean"
@@ -95,17 +94,18 @@ class Pyre(object):
         specify which one you want to use, or strange things can happen."""
         logging.debug("set_interface not implemented") #TODO
     
-    async def start(self, receiver):
+    async def start(self):
         """Start node, after setting header values. When you start a node it
         begins discovery and connection. Returns 0 if OK, -1 if it wasn't
         possible to start the node."""
-        self.node = PyreNode(receiver)
+        self.node = PyreNode()
 
         # Send name, if any, to node backend
         if (self._name):
             self.node.name = self._name
 
         await self.node.start()
+        self._inbox.connect("inproc://events")
         self.engine = asyncio.create_task(self.node.run()) 
 
     async def stop(self):
@@ -113,7 +113,15 @@ class Pyre(object):
         This is polite; however you can also just destroy the node without
         stopping it."""
         await self.node.stop()
+        self._inbox.disconnect("inproc://events")
         await self.engine
+    
+    # Receive next message from node
+    async def recv(self):
+        """Receive next message from network; the message may be a control
+        message (ENTER, EXIT, JOIN, LEAVE) or data (WHISPER, SHOUT).
+        """
+        return await self._inbox.recv_multipart()
 
     async def join(self, groupname):
         """Join a named group; after joining a group you can send messages to
@@ -156,7 +164,7 @@ class Pyre(object):
         """Iterator that yields `PyreEvent`s indefinitely"""
         while True:
             yield PyreEvent(self)
-
+    
     def peer_address(self, peer):
         """Return the endpoint of a connected peer."""
         return self.node.peers.get(peer).get_endpoint()
