@@ -76,6 +76,10 @@ class PyreNode(object):
         self.peer_groups = {}                       # Groups that our peers are in
         self.own_groups = {}                        # Groups that we are in
         self.headers = {}                           # Our header values
+
+        self.transport = None
+        self.protocol = None
+
         # TODO: gossip stuff
         # self.start()
 
@@ -118,17 +122,26 @@ class PyreNode(object):
                     
             self.filter = struct.pack("ccc", b'Z', b'R', b'E')
 
-            self.endpoint = "tcp://%s:%d" %(hostname, self.port)            
+            self.endpoint = "tcp://%s:%d" %(hostname, self.port)
+
+            # this will receive asynchronously on its own
+            self.transport, self.protocol = await asyncio.get_event_loop().create_datagram_endpoint(
+                lambda: self.beacon_receiver,
+                sock=self.beacon.get_socket())
 
     async def stop(self):
         logger.debug("Pyre node: stopping beacon")
-        if self.beacon:
-            self.transmit = struct.pack('cccb16sH', b'Z',b'R',b'E',
-                        BEACON_VERSION, self.identity.bytes,
-                        socket.htons(0))
-            await asyncio.sleep(1.0)
-            self.beacon = None
-        self.beacon_port = 0
+        # this will stop the beacon, reaper and router receiver
+        self._terminated = True
+        # we still want to force out one last beacon to inform peers
+        # we are leaving
+        self.transmit = struct.pack('cccb16sH', b'Z',b'R',b'E',
+                    BEACON_VERSION, self.identity.bytes,
+                    socket.htons(0))
+        await self.beacon.send_beacon(self.transport, self.transmit)
+            # self.beacon = None
+        # self.beacon_port = 0
+        
 
     def bind(self, endpoint):
         logger.warning("Not implemented")
@@ -280,7 +293,7 @@ class PyreNode(object):
         logger.debug("({0}) LEAVE name={1} group={2}".format(self.name, peer.get_name(), groupname))
 
     # Here we handle messages coming from other peers
-    async def run_recv_peer(self):
+    async def run_router_receiver(self):
         while not self._terminated:
             zmsg = ZreMsg()
             await zmsg.recv(self.inbox)
@@ -444,23 +457,18 @@ class PyreNode(object):
             
     async def run_beacon(self):
         print("running beacon")
-        # this will receive asynchronously on its own
-        _transport, _protocol = await asyncio.get_event_loop().create_datagram_endpoint(
-                lambda: self.beacon_receiver,
-                sock=self.beacon.get_socket())
-        
         while not self._terminated:
             # keep looping
             # send the beacon at interval
-            await self.beacon.send_beacon(_transport, self.transmit)
+            await self.beacon.send_beacon(self.transport, self.transmit)
             # sleep interval
             await asyncio.sleep(1.0)
     
     async def run(self):
         tasks = [
-            self.run_beacon(),
-            self.run_reaper(),
-            self.run_recv_peer()
+            self.run_beacon(),          # periodically send beacon
+            self.run_reaper(),          # periodically poke peers
+            self.run_router_receiver()  # receive incoming messages from peers
         ]
         
         await asyncio.gather(*tasks)

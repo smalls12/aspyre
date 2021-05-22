@@ -36,6 +36,7 @@ class Pyre(object):
         self._uuid = None
         self._receiver = receiver
         self._name = name
+        self.engine = None
         self.verbose = True
                 
     async def __aenter__(self):
@@ -105,12 +106,14 @@ class Pyre(object):
             self.node.name = self._name
 
         await self.node.start()
+        self.engine = asyncio.create_task(self.node.run()) 
 
     async def stop(self):
         """Stop node; this signals to other peers that this node will go away.
         This is polite; however you can also just destroy the node without
         stopping it."""
         await self.node.stop()
+        await self.engine
 
     async def join(self, groupname):
         """Join a named group; after joining a group you can send messages to
@@ -180,9 +183,6 @@ class Pyre(object):
     def socket(self):
         """Return socket for talking to the Zyre node, for polling"""
         return self.inbox
-    
-    async def run(self):       
-        await self.node.run()
 
     @staticmethod
     def version():

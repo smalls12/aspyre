@@ -35,16 +35,8 @@ one task to run the pyre engine
 the other task to do some work
 '''
 async def main():
-    async with pyre.Pyre(receiver) as node:
-        # start pyre node
-        # this will start the pyre engine
-        # send/receive beacons
-        # receive messages
-        # etc
-        pyre_node_work = asyncio.create_task(node.run())
-        
-        # start work
-        # going to wait for it to finish
+    # this will automatically start the pyre engine
+    async with pyre.Pyre(receiver) as node:       
         await asyncio.create_task(work(node))
 
 if __name__ == '__main__':
