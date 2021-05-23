@@ -12,7 +12,7 @@ from zmq.asyncio import Context
 
 logger = logging.getLogger(__name__)
 
-raw_input = input  # Python 3
+raw_input = input
 
 class Pyre(object):
 
@@ -36,7 +36,8 @@ class Pyre(object):
         self._uuid = None
         self._inbox = self._ctx.socket(zmq.PULL)
         self._name = name
-        self.engine = None
+        
+        self.listening = False
         self.verbose = True
                 
     async def __aenter__(self):
@@ -96,31 +97,52 @@ class Pyre(object):
     async def start(self):
         """Start node, after setting header values. When you start a node it
         begins discovery and connection. Returns 0 if OK, -1 if it wasn't
-        possible to start the node."""
+        possible to start the node."""        
         self.node = PyreNode()
+        
+        self._inbox.connect(f"inproc://events-{self.node.identity}")
 
         # Send name, if any, to node backend
         if (self._name):
             self.node.name = self._name
 
-        await self.node.start()
-        self._inbox.connect("inproc://events")
-        self.engine = asyncio.create_task(self.node.run()) 
+        await self.node.start()              
 
     async def stop(self):
         """Stop node; this signals to other peers that this node will go away.
         This is polite; however you can also just destroy the node without
         stopping it."""
-        await self.node.stop()
-        self._inbox.disconnect("inproc://events")
-        await self.engine
+        if self.node.engine_running:
+            await self.node.stop()
+            self._inbox.disconnect(f"inproc://events-{self.node.identity}")
     
+    '''
+    this will block the caller
+    but won't block the asynchronous context
+
+    keep receiving messages until the engine stops or
+    specifically requested to stop vie ::stop_listening
+    '''
+    async def listen(self, receiver):
+        self.listening = True
+        while self.node.engine_running and self.listening:
+            try:
+                await receiver(self, await self.recv())                
+            except asyncio.TimeoutError:
+                pass
+    
+    '''
+    this will cause any current ::listen calls to end
+    '''
+    def stop_listening(self):
+        self.listening = False
+
     # Receive next message from node
     async def recv(self):
         """Receive next message from network; the message may be a control
         message (ENTER, EXIT, JOIN, LEAVE) or data (WHISPER, SHOUT).
         """
-        return await self._inbox.recv_multipart()
+        return await asyncio.wait_for(self._inbox.recv_multipart(), timeout=0.5)
 
     async def join(self, groupname):
         """Join a named group; after joining a group you can send messages to

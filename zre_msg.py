@@ -29,7 +29,6 @@
 
 import struct
 import uuid
-import zmq
 import logging
 
 STRING_MAX = 255
@@ -65,17 +64,14 @@ class ZreMsg(object):
 
     #def __del__(self):
 
-    async def recv(self, input_socket):
-        # If we're reading from a ROUTER socket, get address
-        frames = await input_socket.recv_multipart()
-        if input_socket.type == zmq.ROUTER:
-            self.address = frames.pop(0)
-            # we drop the first byte: TODO ref!
-            try:
-                self.address = uuid.UUID(bytes=self.address[1:])
-            except ValueError:
-                logger.debug("Peer identity frame empty or malformed")
-                return None
+    def parse(self, frames):        
+        self.address = frames.pop(0)
+        # we drop the first byte: TODO ref!
+        try:
+            self.address = uuid.UUID(bytes=self.address[1:])
+        except ValueError:
+            logger.debug("Peer identity frame empty or malformed")
+            return None
 
         # Read and parse command in frame
         self.struct_data = frames.pop(0)
@@ -135,7 +131,7 @@ class ZreMsg(object):
             logger.debug("Message type {0} unknown".format(self.id))
 
     # Send the zre_msg to the output, and destroy it
-    async def send(self, output_socket):
+    def build(self):
         # clear data
         self.struct_data = b''
         self._needle = 0
@@ -181,10 +177,7 @@ class ZreMsg(object):
             logger.debug("Message type {0} unknown".format(self.id))
 
         messages = []
-        # If we're sending to a ROUTER, we send the address first
-        if output_socket.type == zmq.ROUTER:
-            messages.append(self.address.bytes)
-        
+       
         # Now send the data frame
         messages.append(self.struct_data)
         if (self.content):
@@ -194,7 +187,7 @@ class ZreMsg(object):
             else:
                 messages.append(self.content)
         
-        await output_socket.send_multipart(messages)
+        return messages
 
     # Send the HELLO to the output in one step
     def send_hello(self, output, sequence, ipaddress, mailbox, groups, status, headers):

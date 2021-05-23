@@ -222,7 +222,7 @@ class ZAsyncBeacon(object):
         self.terminated = True
 
     async def send_beacon(self, transport, data):
-        print("send beacon")
+        logger.debug(f"Send beacon [{data}] from [{(str(self.broadcast_address), self.port_nbr)}]")
         try:
             transport.sendto(data, (str(self.broadcast_address), self.port_nbr))
         except OSError as e:

@@ -1,5 +1,4 @@
 import time
-import zmq
 import logging
 
 import asyncio
@@ -73,6 +72,7 @@ class PyrePeer(object):
         # If connected, destroy socket and drop all pending messages
         if (self.connected):
             logger.debug("{0} Disconnecting peer {1}".format(self.origin, self.name))
+            self.mailbox.disconnect(self.endpoint)
             self.mailbox.close()
             self.mailbox = None
             self.endpoint = ""
@@ -88,7 +88,7 @@ class PyrePeer(object):
             msg.set_sequence(self.sent_sequence)
 
             try:
-                await msg.send(self.mailbox)
+                await self.mailbox.send_multipart(msg.build())
             except zmq.Again as e:
                 self.disconnect()
                 logger.debug("{0} Error while sending {1} to peer={2} sequence={3}".format(self.origin,
@@ -207,6 +207,6 @@ class PyrePeer(object):
                 self.name,
                 self.want_sequence,
                 msg.get_sequence())
-            return True;
+            return True
         return False
     # end check_message
