@@ -1,3 +1,5 @@
+[![Pylint](https://github.com/smalls12/aspyre/actions/workflows/pylint.yml/badge.svg)](https://github.com/smalls12/aspyre/actions/workflows/pylint.yml)
+
 # aspyre
 Asyncio Pyre
 
