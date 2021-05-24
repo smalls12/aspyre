@@ -39,27 +39,23 @@ of these mechanisms as part of a single code base.
 
 ```python
 import asyncio
-import pyre
+import aspyre
 
-async def work(pyre):
-    await asyncio.sleep(1)
-    await pyre.shout("blah", b"look at this shout message")
-    await asyncio.sleep(1)
-    peers = pyre.get_peers()
-    peer = list(peers)[0]
-    print(pyre.peer_address(peer))
-    await pyre.whisper(list(peers)[0], b"look at this whisper message")
+async def receiver(node, message):
+    print(message)
 
 async def main():
     # this will automatically start the pyre engine
-    async with pyre.Pyre() as node:               
+    async with aspyre.Pyre() as node:               
         await node.join("blah")
         try:
-            work_task = asyncio.create_task(work(node))
-            while True:
-                print(await node.recv())
+            try:
+                # run aspyre for 10 seconds
+                await asyncio.wait_for(node.listen(receiver), timeout=10)
+            except asyncio.TimeoutError:
+                pass
         finally:
-            await work_task
+            # await work_task
             await node.leave("blah")
 
 if __name__ == '__main__':

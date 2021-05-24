@@ -209,6 +209,8 @@ class PyreNode(object):
             msg.set_address(peer_id)
             msg.content = content
             await self.peers[peer_id].send(msg)
+        else:
+            logger.warning(f"Unknown peer [{peer_id}]")
     
     def get_peers(self):
         return self.peers.keys()

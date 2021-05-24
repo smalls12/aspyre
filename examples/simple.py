@@ -1,7 +1,8 @@
 '''
-this is a long running example that also performs some work
+this is just an example showing how to listen for messages for a specific
+period of time
 
-the script will only end with a keyboard interrupt
+the app closes after 10 seconds
 '''
 
 import logging
