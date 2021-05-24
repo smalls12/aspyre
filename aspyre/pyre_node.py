@@ -50,7 +50,6 @@ class PyreNode(object):
         self._ctx = Context.instance()
 
         self._terminated = False                    # API shut us down
-        self._verbose = True                       # Log all traffic (logging module?)
         self.beacon_port = ZRE_DISCOVERY_PORT       # Beacon port number
         self.interval = 0                           # Beacon interval 0=default
         self.beacon = None                          # Beacon actor
@@ -102,13 +101,11 @@ class PyreNode(object):
         # on all available network interfaces. This is orthogonal to
         # beaconing, since we can connect to other peers and they will
         # gossip our endpoint to others.
+        logger.debug("Start")
         if self.beacon_port:
             # Start beacon discovery
             self.beacon = ZAsyncBeacon()
             self.beacon_receiver = PyreNodeBeaconReceiver(self.recv_beacon)
-
-            if self._verbose:
-                self.beacon.set_verbose()
 
             self.beacon.start(self.identity, self.beacon_port)
 
@@ -144,7 +141,7 @@ class PyreNode(object):
             self.engine = asyncio.create_task(self.run())
 
     async def stop(self):
-        logger.debug("Pyre node: stopping beacon")
+        logger.debug("Stopping")
         # this will stop the beacon, reaper and router receiver
         self._terminated = True
         # we still want to force out one last beacon to inform peers
@@ -227,14 +224,12 @@ class PyreNode(object):
         peer = self.peers.get(identity)
         if not peer:
             # Purge any previous peer on same endpoint
-            for _, _peer in self.peers.items():
+            for _, _peer in self.peers.copy().items():
                 await self.purge_peer(_peer, endpoint)
 
             peer = PyrePeer(self._ctx, identity)
             self.peers[identity] = peer
             peer.set_origin(self.name)
-            # TODO: this could be handy, to set verbosity on a specific peer
-            #zyre_peer_set_verbose (peer, self->verbose);
             peer.connect(self.identity, endpoint)
 
             # Handshake discovery by sending HELLO as first message
@@ -447,11 +442,9 @@ class PyreNode(object):
     async def ping_peer(self, peer_id):
         peer = self.peers.get(peer_id)
         if time.time() > peer.expired_at:
-            print("remove")
             logger.debug("({0}) peer expired name={1} endpoint={2}".format(self.name, peer.get_name(), peer.get_endpoint()))
             await self.remove_peer(peer)
         elif time.time() > peer.evasive_at:
-            print("ping")
             # If peer is being evasive, force a TCP ping.
             # TODO: do this only once for a peer in this state;
             # it would be nicer to use a proper state machine
@@ -467,7 +460,7 @@ class PyreNode(object):
         while not self._terminated:
             # keep looping
             # Ping all peers and reap any expired ones
-            for peer_id in self.peers.keys():
+            for peer_id in self.peers.copy().keys():
                 await self.ping_peer(peer_id)
             # sleep interval
             await asyncio.sleep(REAP_INTERVAL)
@@ -485,18 +478,21 @@ class PyreNode(object):
     ie. a task not being checked until the very end
     '''
     async def run(self):
-        tasks = [
-            self.run_beacon(),          # periodically send beacon
-            self.run_reaper(),          # periodically poke peers
-            self.run_router_receiver()  # receive incoming messages from peers
-        ]
-        
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
-        if pending:
-            await self.stop()
-            await asyncio.gather(*pending)
+        try:
+            tasks = [
+                self.run_beacon(),          # periodically send beacon
+                self.run_reaper(),          # periodically poke peers
+                self.run_router_receiver()  # receive incoming messages from peers
+            ]
             
+            # done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+            # if pending:
+            #     await self.stop()
+            #     await asyncio.gather(*pending)
+                
+            #     self.engine_running = False
+            #     raise Exception("Error")
+            
+            await asyncio.gather(*tasks)
+        finally:
             self.engine_running = False
-            raise Exception("Error")
-        
-        self.engine_running = False

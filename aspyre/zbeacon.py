@@ -60,7 +60,6 @@ class ZAsyncBeacon(object):
         self.ping_at = time.time()    #  Next broadcast time
 
         self.terminated = False       #  Did caller ask us to quit?
-        self.verbose = False          #  Verbose logging enabled?
         self.hostname = ""            #  Saved host name
 
         self.address = None
@@ -206,9 +205,6 @@ class ZAsyncBeacon(object):
         logger.debug("Broadcast: {0}".format(self.broadcast_address))
         logger.debug("Interface name: {0}".format(self.interface_name))
 
-    def set_verbose(self):
-        self.verbose = True
-    
     def set_port(self, port_nbr):
         self.port_nbr = port_nbr
     

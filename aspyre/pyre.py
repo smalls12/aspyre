@@ -38,7 +38,6 @@ class Pyre(object):
         self._name = name
         
         self.listening = False
-        self.verbose = True
                 
     async def __aenter__(self):
         await self.start()
@@ -71,11 +70,6 @@ class Pyre(object):
         """Set node header; these are provided to other nodes during discovery
         and come in each ENTER message."""
         self.node.header.update({key: value})
-
-    def set_verbose(self):
-        """Set verbose mode; this tells the node to log all traffic as well as
-        all major events."""
-        self.node.verbose = True
 
     def set_port(self, port_nbr):
         """Set UDP beacon discovery port; defaults to 5670, this call overrides
