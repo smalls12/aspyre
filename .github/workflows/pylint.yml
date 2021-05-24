@@ -16,7 +16,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pylint
+        pip install pylint pyzmq
     - name: Analysing the code with pylint
       run: |
         cd aspyre; pylint `ls -R|grep .py$|xargs`
