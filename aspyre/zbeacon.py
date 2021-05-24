@@ -30,9 +30,8 @@ import struct
 import time
 from sys import platform
 import uuid
-import zhelper
-# from . import zhelper
-from zhelper import u
+from . import zhelper
+from .zhelper import u
 
 import asyncio
 

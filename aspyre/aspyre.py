@@ -2,8 +2,8 @@ import uuid
 import logging
 
 # local modules
-from pyre_node import PyreNode
-from pyre_event import PyreEvent
+from .pyre_node import PyreNode
+from .pyre_event import PyreEvent
 
 import asyncio
 

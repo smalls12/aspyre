@@ -6,7 +6,7 @@ the script will only end with a keyboard interrupt
 
 import logging
 import asyncio
-import pyre
+import aspyre
 
 async def work(node):
     await asyncio.sleep(1)
@@ -25,7 +25,7 @@ async def receiver(node, message):
 
 async def main():
     # this will automatically start the pyre engine
-    async with pyre.Pyre() as node:               
+    async with aspyre.Pyre() as node:               
         await node.join("blah")
         try:
             tasks = [
@@ -42,7 +42,7 @@ async def main():
 if __name__ == '__main__':
     FORMAT = '%(asctime)s - %(name)s:%(lineno)d - %(levelname)s - %(message)s'
     # Create a StreamHandler for debugging
-    logger = logging.getLogger("pyre")
+    logger = logging.getLogger("aspyre")
     logger.setLevel(logging.DEBUG)
     # i.e. logging.DEBUG, logging.WARNING
     handler = logging.StreamHandler()

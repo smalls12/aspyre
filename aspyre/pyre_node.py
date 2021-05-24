@@ -4,10 +4,10 @@ import struct
 import socket
 import time
 
-from zbeacon import ZAsyncBeacon
-from zre_msg import ZreMsg
-from pyre_peer import PyrePeer
-from pyre_group import PyreGroup
+from .zbeacon import ZAsyncBeacon
+from .zre_msg import ZreMsg
+from .pyre_peer import PyrePeer
+from .pyre_group import PyreGroup
 
 import json
 
