@@ -1,20 +1,16 @@
 import uuid
 import logging
+import asyncio
+import zmq.asyncio
+from zmq.asyncio import Context
 
 # local modules
 from .pyre_node import PyreNode
 from .pyre_event import PyreEvent
 
-import asyncio
-
-import zmq.asyncio
-from zmq.asyncio import Context
-
 logger = logging.getLogger(__name__)
 
-raw_input = input
-
-class Pyre(object):
+class Pyre():
 
     def __init__(self, name=None, ctx=None, *args, **kwargs):
         """Constructor, creates a new Zyre node. Note that until you start the
@@ -30,28 +26,25 @@ class Pyre(object):
         """
         super(Pyre, self).__init__(*args, **kwargs)
         ctx = kwargs.get('ctx')
-        if ctx == None:
+        if ctx is None:
             ctx = Context.instance()
         self._ctx = ctx
         self._uuid = None
+        self.node = None
         self._inbox = self._ctx.socket(zmq.PULL)
         self._name = name
-        
+
         self.listening = False
-                
+
     async def __aenter__(self):
         await self.start()
         return self
-    
+
     async def __aexit__(self, type, value, traceback):
         await self.stop()
 
     def __del__(self):
-        self._inbox.close()        
-
-    def __bool__(self):
-        "Determine whether the object is valid by converting to boolean"
-        return True  #TODO
+        self._inbox.close()
 
     def uuid(self):
         """Return our node UUID string, after successful initialization"""
@@ -87,20 +80,20 @@ class Pyre(object):
         choose an interface for you. On boxes with several interfaces you should
         specify which one you want to use, or strange things can happen."""
         logging.debug("set_interface not implemented") #TODO
-    
+
     async def start(self):
         """Start node, after setting header values. When you start a node it
         begins discovery and connection. Returns 0 if OK, -1 if it wasn't
-        possible to start the node."""        
+        possible to start the node."""
         self.node = PyreNode()
-        
+
         self._inbox.connect(f"inproc://events-{self.node.identity}")
 
         # Send name, if any, to node backend
-        if (self._name):
+        if self._name:
             self.node.name = self._name
 
-        await self.node.start()              
+        await self.node.start()
 
     async def stop(self):
         """Stop node; this signals to other peers that this node will go away.
@@ -109,7 +102,7 @@ class Pyre(object):
         if self.node.engine_running:
             await self.node.stop()
             self._inbox.disconnect(f"inproc://events-{self.node.identity}")
-    
+
     '''
     this will block the caller
     but won't block the asynchronous context
@@ -121,10 +114,10 @@ class Pyre(object):
         self.listening = True
         while self.node.engine_running and self.listening:
             try:
-                await receiver(self, await self.recv())                
+                await receiver(self, await self.recv())
             except asyncio.TimeoutError:
                 pass
-    
+
     '''
     this will cause any current ::listen calls to end
     '''
@@ -179,7 +172,7 @@ class Pyre(object):
         """Iterator that yields `PyreEvent`s indefinitely"""
         while True:
             yield PyreEvent(self)
-    
+
     def peer_address(self, peer):
         """Return the endpoint of a connected peer."""
         return self.node.peers.get(peer).get_endpoint()
@@ -201,11 +194,6 @@ class Pyre(object):
     def peer_groups(self):
         """Return list of groups known through connected peers."""
         return list(self.node.peer_groups.keys())
-
-    # Return node socket, for direct polling of socket
-    def socket(self):
-        """Return socket for talking to the Zyre node, for polling"""
-        return self.inbox
 
     @staticmethod
     def version():
