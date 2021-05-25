@@ -58,25 +58,9 @@ async def main():
         pass
 
 if __name__ == '__main__':
-    FORMAT = '%(asctime)s - %(name)s:%(lineno)d - %(levelname)s - %(message)s'
+    FORMAT = '%(asctime)s - %(name)s - %(filename)s:%(lineno)d - %(levelname)s - %(message)s'
     # Create a StreamHandler for debugging
     logger = logging.getLogger("aspyre")
-    logger.setLevel(logging.DEBUG)
-    # i.e. logging.DEBUG, logging.WARNING
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter(FORMAT))
-    logger.addHandler(handler)
-    logger.propagate = False
-    
-    logger = logging.getLogger("pyre_node")
-    logger.setLevel(logging.DEBUG)
-    # i.e. logging.DEBUG, logging.WARNING
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter(FORMAT))
-    logger.addHandler(handler)
-    logger.propagate = False
-
-    logger = logging.getLogger("zbeacon")
     logger.setLevel(logging.DEBUG)
     # i.e. logging.DEBUG, logging.WARNING
     handler = logging.StreamHandler()

@@ -10,7 +10,7 @@ from .pyre_event import PyreEvent
 
 class Pyre():
 
-    def __init__(self, name=None, ctx=None, *args, **kwargs):
+    def __init__(self, name=None, ctx=None):
         """Constructor, creates a new Zyre node. Note that until you start the
         node it is silent and invisible to other nodes on the network.
         The node name is provided to other nodes during discovery. If you
@@ -22,16 +22,15 @@ class Pyre():
         Kwargs:
             ctx: PyZMQ Context, if not specified a new context will be created
         """
-        self._identity = uuid.uuid4()                # Our UUID as object
+        self._identity = uuid.uuid4()
         self._name = name
         if self._name is None:
-            self._name = str(self._identity)[:6]          # Our public name (default=first 6 uuid chars)        
+            self._name = str(self._identity)[:6]
         self._logger = logging.getLogger("aspyre").getChild(self._name)
 
-        ctx = kwargs.get('ctx')
-        if ctx is None:
-            ctx = Context.instance()
         self._ctx = ctx
+        if ctx is None:
+            self._ctx = Context.instance()
         self._node = None
         self._inbox = None
         self._listening = False
@@ -49,7 +48,7 @@ class Pyre():
         """Return our node UUID string, after successful initialization"""
         return self._identity
 
-    # Return our node name, after successful initialization
+    @property
     def name(self):
         """Return our node name, after successful initialization"""
         return self._name
@@ -57,7 +56,7 @@ class Pyre():
     def set_header(self, key, value):
         """Set node header; these are provided to other nodes during discovery
         and come in each ENTER message."""
-        self._node.header.update({key: value})
+        self._node.headers.update({key: value})
 
     def set_port(self, port_nbr):
         """Set UDP beacon discovery port; defaults to 5670, this call overrides
@@ -74,14 +73,14 @@ class Pyre():
         """Set network interface for UDP beacons. If you do not set this, CZMQ will
         choose an interface for you. On boxes with several interfaces you should
         specify which one you want to use, or strange things can happen."""
-        self.logger.debug("set_interface not implemented") #TODO
+        self._logger.debug("set_interface not implemented") #TODO
 
     async def start(self):
         """Start node, after setting header values. When you start a node it
         begins discovery and connection. Returns 0 if OK, -1 if it wasn't
         possible to start the node."""
         self._node = PyreNode(self._identity, self._name)
-        
+
         self._inbox = self._ctx.socket(zmq.PULL)
         self._inbox.connect(f"inproc://events-{self._identity}")
 
@@ -157,16 +156,6 @@ class Pyre():
         """Return own endpoint"""
         return self._node.endpoint
 
-    def recent_events(self):
-        """Iterator that yields recent `PyreEvent`s"""
-        while self.socket().get(zmq.EVENTS) & zmq.POLLIN:
-            yield PyreEvent(self)
-
-    def events(self):
-        """Iterator that yields `PyreEvent`s indefinitely"""
-        while True:
-            yield PyreEvent(self)
-
     def peer_address(self, peer):
         """Return the endpoint of a connected peer."""
         return self._node.peers.get(peer).get_endpoint()
@@ -188,7 +177,3 @@ class Pyre():
     def peer_groups(self):
         """Return list of groups known through connected peers."""
         return list(self._node.peer_groups.keys())
-
-    @staticmethod
-    def version():
-        return __version_info__
