@@ -38,8 +38,6 @@ import asyncio
 import zmq.asyncio
 from zmq.asyncio import Context
 
-logger = logging.getLogger(__name__)
-
 BEACON_VERSION = 1
 
 INTERVAL_DFLT = 1.0
@@ -48,9 +46,11 @@ MULTICAST_GRP = '225.25.25.25'
 ENETDOWN = 50   #socket error, network is down
 ENETUNREACH = 51 #socket error, network unreachable
 
-class ZAsyncBeacon(object):
+class ZAsyncBeacon():
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, name, *args, **kwargs):
+        self.name = name
+        self.logger = logging.getLogger("aspyre").getChild(self.name)
         self.udpsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
                                       #  UDP socket for send/recv
 
@@ -137,32 +137,32 @@ class ZAsyncBeacon(object):
                 else:
                     self.udpsock.bind(("", self.port_nbr))
 
-                logger.debug("Set up a broadcast beacon to {0}:{1}".format(self.broadcast_address, self.port_nbr))
+                self.logger.debug("Set up a broadcast beacon to {0}:{1}".format(self.broadcast_address, self.port_nbr))
         except socket.error:
-            logger.exception("Initializing of {0} raised an exception".format(self.__class__.__name__))
+            self.logger.exception("Initializing of {0} raised an exception".format(self.__class__.__name__))
 
     def _prepare_socket(self):
         netinf = zhelper.get_ifaddrs()
 
-        logger.debug("Available interfaces: {0}".format(netinf))
+        self.logger.debug("Available interfaces: {0}".format(netinf))
 
         for iface in netinf:
             # Loop over the interfaces and their settings to try to find the broadcast address.
             # ipv4 only currently and needs a valid broadcast address
             for name, data in iface.items():
-                logger.debug("Checking out interface {0}.".format(name))
+                self.logger.debug("Checking out interface {0}.".format(name))
                 # For some reason the data we need lives in the "2" section of the interface.
                 data_2 = data.get(2)
 
                 if not data_2:
-                    logger.debug("No data_2 found for interface {0}.".format(name))
+                    self.logger.debug("No data_2 found for interface {0}.".format(name))
                     continue
 
                 address_str = data_2.get("addr")
                 netmask_str = data_2.get("netmask")
 
                 if not address_str or not netmask_str:
-                    logger.debug("Address or netmask not found for interface {0}.".format(name))
+                    self.logger.debug("Address or netmask not found for interface {0}.".format(name))
                     continue
 
                 if isinstance(address_str, bytes):
@@ -176,11 +176,11 @@ class ZAsyncBeacon(object):
                 interface = ipaddress.ip_interface(u(interface_string))
 
                 if interface.is_loopback:
-                    logger.debug("Interface {0} is a loopback device.".format(name))
+                    self.logger.debug("Interface {0} is a loopback device.".format(name))
                     continue
 
                 if interface.is_link_local:
-                    logger.debug("Interface {0} is a link-local device.".format(name))
+                    self.logger.debug("Interface {0} is a link-local device.".format(name))
                     continue
 
                 self.address = interface.ip
@@ -191,7 +191,7 @@ class ZAsyncBeacon(object):
             if self.address:
                 break
 
-        logger.debug("Finished scanning interfaces.")
+        self.logger.debug("Finished scanning interfaces.")
 
         if not self.address:
             self.network_address = ipaddress.IPv4Address(u('127.0.0.1'))
@@ -199,10 +199,10 @@ class ZAsyncBeacon(object):
             self.interface_name = 'loopback'
             self.address = u('127.0.0.1')
 
-        logger.debug("Address: {0}".format(self.address))
-        logger.debug("Network: {0}".format(self.network_address))
-        logger.debug("Broadcast: {0}".format(self.broadcast_address))
-        logger.debug("Interface name: {0}".format(self.interface_name))
+        self.logger.debug("Address: {0}".format(self.address))
+        self.logger.debug("Network: {0}".format(self.network_address))
+        self.logger.debug("Broadcast: {0}".format(self.broadcast_address))
+        self.logger.debug("Interface name: {0}".format(self.interface_name))
 
     def set_port(self, port_nbr):
         self.port_nbr = port_nbr
@@ -217,7 +217,7 @@ class ZAsyncBeacon(object):
         self.terminated = True
 
     async def send_beacon(self, transport, data):
-        logger.debug(f"Send beacon [{data}] from [{(str(self.broadcast_address), self.port_nbr)}]")
+        self.logger.debug(f"Send beacon [{data}] from [{(str(self.broadcast_address), self.port_nbr)}]")
         try:
             transport.sendto(data, (str(self.broadcast_address), self.port_nbr))
         except OSError as e:
@@ -230,10 +230,10 @@ class ZAsyncBeacon(object):
             
             # all other cases, we'll terminate
             else:
-                logger.debug("Network seems gone, exiting zbeacon")
+                self.logger.debug("Network seems gone, exiting zbeacon")
                 self.terminated = True
                 
         except socket.error:
-            logger.debug("Network seems gone, exiting zbeacon")
+            self.logger.debug("Network seems gone, exiting zbeacon")
             self.terminated = True
 

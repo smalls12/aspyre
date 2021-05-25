@@ -6,21 +6,20 @@ import asyncio
 import zmq.asyncio
 from zmq.asyncio import Context
 
-logger = logging.getLogger(__name__)
-
-
-class PyrePeer(object):
+class PyrePeer():
 
     PEER_EXPIRED = 30              # expire after 10s
     PEER_EVASIVE = 10              # mark evasive after 5s
 
-    def __init__(self, ctx, identity):
-        # TODO: what to do with container?
+    def __init__(self, ctx, name, peer_identity):
+        # TODO: what to do with container?        
         self._ctx = ctx          # ZMQ context
         self.mailbox = None      # Socket through to peer
-        self.identity = identity # Identity UUID
+        self.peer_identity = peer_identity # Identity UUID
         self.endpoint = None     # Endpoint connected to
-        self.name = "notset"     # Peer's public name
+        self.name = name
+        self.logger = logging.getLogger("aspyre").getChild(self.name)
+        self.peer_name = "notset"     # Peer's public name
         self.origin = "unknown"  # Origin node's public name
         self.evasive_at = 0      # Peer is being evasive
         self.expired_at = 0      # Peer has expired by now
@@ -59,7 +58,7 @@ class PyrePeer(object):
         self.mailbox.setsockopt(zmq.SNDTIMEO, 0)
 
         # Connect through to peer node
-        logger.debug("Connecting to peer {0} on endpoint {1}".format(self.identity, endpoint))
+        self.logger.debug("Connecting to peer {0} on endpoint {1}".format(self.peer_identity, endpoint))
 
         self.mailbox.connect(endpoint)
         self.endpoint = endpoint
@@ -71,7 +70,7 @@ class PyrePeer(object):
     def disconnect(self):
         # If connected, destroy socket and drop all pending messages
         if (self.connected):
-            logger.debug("{0} Disconnecting peer {1}".format(self.origin, self.name))
+            self.logger.debug("{0} Disconnecting peer {1}".format(self.origin, self.name))
             self.mailbox.disconnect(self.endpoint)
             self.mailbox.close()
             self.mailbox = None
@@ -91,19 +90,19 @@ class PyrePeer(object):
                 await self.mailbox.send_multipart(msg.build())
             except zmq.Again as e:
                 self.disconnect()
-                logger.debug("{0} Error while sending {1} to peer={2} sequence={3}".format(self.origin,
+                self.logger.debug("{0} Error while sending {1} to peer={2} sequence={3}".format(self.origin,
                                                                             msg.get_command(),
                                                                             self.name,
                                                                             msg.get_sequence()))
                 return -1
 
-            logger.debug("{0} send {1} to peer={2} sequence={3}".format(self.origin,
+            self.logger.debug("{0} send {1} to peer={2} sequence={3}".format(self.origin,
                 msg.get_command(),
                 self.name,
                 msg.get_sequence()))
 
         else:
-            logger.debug("Peer {0} is not connected".format(self.identity))
+            self.logger.debug("Peer {0} is not connected".format(self.peer_identity))
     # end send
 
     # Return peer connected status
@@ -113,7 +112,7 @@ class PyrePeer(object):
 
     # Return peer identity string
     def get_identity(self):
-        return self.identity
+        return self.peer_identity
     # end get_identity
 
     # Return peer connection endpoint
@@ -190,7 +189,7 @@ class PyrePeer(object):
     def messages_lost(self, msg):
         # The sequence number set by the peer, and our own calculated
         # sequence number should be the same.
-        logger.debug("(%s) recv %s from peer=%s sequence=%d"%(
+        self.logger.debug("(%s) recv %s from peer=%s sequence=%d"%(
             self.origin,
             msg.get_command(),
             self.name,
@@ -202,7 +201,7 @@ class PyrePeer(object):
             self.want_sequence = self.want_sequence % 65535
 
         if self.want_sequence != msg.get_sequence():
-            logger.debug("(%s) seq error from peer=%s expect=%d, got=%d",
+            self.logger.debug("(%s) seq error from peer=%s expect=%d, got=%d",
                 self.origin,
                 self.name,
                 self.want_sequence,

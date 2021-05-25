@@ -23,14 +23,14 @@ BEACON_VERSION = 1
 ZRE_DISCOVERY_PORT = 5670
 REAP_INTERVAL = 1.0  # Once per second
 
-logger = logging.getLogger(__name__)
-
 class PyreNodeBeaconReceiver():
-    def __init__(self, callback):
+    def __init__(self, name, callback):
+        self._name = name
+        self.logger = logging.getLogger("aspyre").getChild(self._name)
         self.callback = callback
     
     def connection_made(self, transport):
-        logger.debug("connection made")
+        self.logger.debug("connection made")
 
     def datagram_received(self, frame, addr):
         # even though this is async
@@ -39,14 +39,15 @@ class PyreNodeBeaconReceiver():
         task = asyncio.create_task(self.callback(frame, addr))
     
     def error_received(self, exc):
-        logger.error('Error received:', exc)
+        self.logger.error('Error received:', exc)
 
     def connection_lost(self, exc):
-        logger.error("Connection closed")
+        self.logger.error("Connection closed")
 
-class PyreNode(object):
+class PyreNode():
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, identity, name, *args, **kwargs):
+        
         self._ctx = Context.instance()
 
         self._terminated = False                    # API shut us down
@@ -60,18 +61,14 @@ class PyreNode(object):
         self.transmit = None
         self.filter = b""
 
-        self.identity = uuid.uuid4()                # Our UUID as object
-        self.bound = False
-        self.inbox = self._ctx.socket(zmq.ROUTER)         # Our inbox socket (ROUTER)
-        try:
-            self.inbox.setsockopt(zmq.ROUTER_HANDOVER, 1)
-        except AttributeError as e:
-            logging.warning("can't set ROUTER_HANDOVER, needs zmq version >=4.1 but installed is {0}".format(zmq.zmq_version()))
-        
-        self._outbox = self._ctx.socket(zmq.PUSH)
-        self._outbox.bind(f"inproc://events-{self.identity}")
+        self._identity = identity                    # Our UUID as object
+        self._name = name                            # Our public name (default=first 6 uuid chars)
+        self.logger = logging.getLogger("aspyre").getChild(self._name)
 
-        self.name = str(self.identity)[:6]          # Our public name (default=first 6 uuid chars)
+        self.bound = False
+        self.inbox = None
+        self._outbox = None
+       
         self.endpoint = ""                          # Our public endpoint
         self.port = 0                               # Our inbox port, if any
         self.status = 0                             # Our own change counter
@@ -89,31 +86,32 @@ class PyreNode(object):
         # self.start()
 
     def __del__(self):
-        try:
-            self._outbox.unbind(f"inproc://events-{self.identity}")
-        except zmq.error.ZMQError as e:
-            pass
-        finally:
-            self._outbox.close()
+        pass
 
     async def start(self):
         # TODO: If application didn't bind explicitly, we grab an ephemeral port
         # on all available network interfaces. This is orthogonal to
         # beaconing, since we can connect to other peers and they will
         # gossip our endpoint to others.
-        logger.debug("Start")
+        self.logger.debug("Start")
         if self.beacon_port:
             # Start beacon discovery
-            self.beacon = ZAsyncBeacon()
-            self.beacon_receiver = PyreNodeBeaconReceiver(self.recv_beacon)
+            self.beacon = ZAsyncBeacon(self._name)
+            self.beacon_receiver = PyreNodeBeaconReceiver(self._name, self.recv_beacon)
 
-            self.beacon.start(self.identity, self.beacon_port)
+            self.beacon.start(self._identity, self.beacon_port)
 
             # Our hostname is provided by zbeacon
             hostname = self.beacon.get_address()
 
             #if self.interval:
-            #   self.beacon.set_interval(self.interval)            
+            #   self.beacon.set_interval(self.interval)
+
+            self.inbox = self._ctx.socket(zmq.ROUTER)         # Our inbox socket (ROUTER)
+            try:
+                self.inbox.setsockopt(zmq.ROUTER_HANDOVER, 1)
+            except AttributeError as e:
+                logging.warning("can't set ROUTER_HANDOVER, needs zmq version >=4.1 but installed is {0}".format(zmq.zmq_version()))
 
             # Our hostname is provided by zbeacon
             self.port = self.inbox.bind_to_random_port("tcp://*")
@@ -125,7 +123,7 @@ class PyreNode(object):
                 self.bound = True
             
             self.transmit = struct.pack('cccb16sH', b'Z', b'R', b'E',
-                           BEACON_VERSION, self.identity.bytes,
+                           BEACON_VERSION, self._identity.bytes,
                            socket.htons(self.port))
                     
             self.filter = struct.pack("ccc", b'Z', b'R', b'E')
@@ -135,19 +133,22 @@ class PyreNode(object):
             # this will receive asynchronously on its own
             self.transport, self.protocol = await asyncio.get_event_loop().create_datagram_endpoint(
                 lambda: self.beacon_receiver,
-                sock=self.beacon.get_socket())
+                sock=self.beacon.get_socket())            
+            
+            self._outbox = self._ctx.socket(zmq.PUSH)
+            self._outbox.bind(f"inproc://events-{self._identity}")
             
             self.engine_running = True
             self.engine = asyncio.create_task(self.run())
 
     async def stop(self):
-        logger.debug("Stopping")
+        self.logger.debug("Stopping")
         # this will stop the beacon, reaper and router receiver
         self._terminated = True
         # we still want to force out one last beacon to inform peers
         # we are leaving
         self.transmit = struct.pack('cccb16sH', b'Z',b'R',b'E',
-                    BEACON_VERSION, self.identity.bytes,
+                    BEACON_VERSION, self._identity.bytes,
                     socket.htons(0))
         await self.beacon.send_beacon(self.transport, self.transmit)
         # wait for engine to finish running
@@ -155,14 +156,26 @@ class PyreNode(object):
         # close beacon socket
         self.beacon = None
 
+        try:
+            self._outbox.unbind(f"inproc://events-{self._identity}")
+        except zmq.error.ZMQError as e:
+            pass
+        finally:
+            self._outbox.close()
+
+        # additional cleanup
+        self.peers = None
+        self.peer_groups = None
+        self.own_groups = None
+
     def bind(self, endpoint):
-        logger.warning("Not implemented")
+        self.logger.warning("Not implemented")
     
     async def join(self, groupname):
         grp = self.own_groups.get(groupname)
         if not grp:
             # Only send if we're not already in group
-            grp = PyreGroup(groupname)
+            grp = PyreGroup(self._name, groupname)
             self.own_groups[groupname] = grp
             msg = ZreMsg(ZreMsg.JOIN)
             msg.set_group(groupname)
@@ -172,7 +185,7 @@ class PyreNode(object):
             for peer in self.peers.values():
                 await peer.send(msg)
 
-            logger.debug("Node is joining group {0}".format(groupname))
+            self.logger.debug("Node is joining group {0}".format(groupname))
     
     async def leave(self, groupname):
         grp = self.own_groups.get(groupname)
@@ -188,7 +201,7 @@ class PyreNode(object):
 
             self.own_groups.pop(groupname)
 
-            logger.debug("Node is leaving group {0}".format(groupname))
+            self.logger.debug("Node is leaving group {0}".format(groupname))
 
     async def shout(self, groupname, content):
         # Get group to send message to
@@ -199,7 +212,7 @@ class PyreNode(object):
         if self.peer_groups.get(groupname):
             await self.peer_groups[groupname].send(msg)
         else:
-            logger.warning("Group {0} not found.".format(groupname))
+            self.logger.warning("Group {0} not found.".format(groupname))
     
     async def whisper(self, peer_id, content):
         # Send frame on out to peer's mailbox, drop message
@@ -210,7 +223,7 @@ class PyreNode(object):
             msg.content = content
             await self.peers[peer_id].send(msg)
         else:
-            logger.warning(f"Unknown peer [{peer_id}]")
+            self.logger.warning(f"Unknown peer [{peer_id}]")
     
     def get_peers(self):
         return self.peers.keys()
@@ -219,35 +232,31 @@ class PyreNode(object):
         if (peer.get_endpoint() == endpoint):
             await self.remove_peer(peer)
             peer.disconnect()
-            logger.debug("Purge peer: {0}{1}".format(peer,endpoint))
+            self.logger.debug("Purge peer: {0}{1}".format(peer,endpoint))
 
     # Find or create peer via its UUID string
-    async def require_peer(self, identity, endpoint):
-        peer = self.peers.get(identity)
+    async def require_peer(self, peer_identity, endpoint):
+        peer = self.peers.get(peer_identity)
         if not peer:
             # Purge any previous peer on same endpoint
             for _, _peer in self.peers.copy().items():
                 await self.purge_peer(_peer, endpoint)
 
-            peer = PyrePeer(self._ctx, identity)
-            self.peers[identity] = peer
-            peer.set_origin(self.name)
-            peer.connect(self.identity, endpoint)
+            peer = PyrePeer(self._ctx, self._name, peer_identity)
+            self.peers[peer_identity] = peer
+            peer.set_origin(self._name)
+            peer.connect(self._identity, endpoint)
 
             # Handshake discovery by sending HELLO as first message
             message = ZreMsg(ZreMsg.HELLO)
             message.set_endpoint(self.endpoint)
             message.set_groups(self.own_groups.keys())
             message.set_status(self.status)
-            message.set_name(self.name)
+            message.set_name(self._name)
             message.set_headers(self.headers)
             await peer.send(message)
 
         return peer
-
-    #  Remove peer from group, if it's a member
-    def delete_peer(self, peer, group):
-        group.leave(peer)
 
     #  Remove a peer from our data structures
     async def remove_peer(self, peer):
@@ -257,10 +266,10 @@ class PyreNode(object):
             peer.get_identity().bytes,
             peer.get_name().encode('utf-8')
         ])
-        logger.debug("({0}) EXIT name={1}".format(peer, peer.get_endpoint()))
+        self.logger.debug("({0}) EXIT name={1}".format(peer, peer.get_endpoint()))
         # Remove peer from any groups we've got it in
         for grp in self.peer_groups.values():
-            self.delete_peer(peer, grp)
+            grp.leave(peer)
         # To destroy peer, we remove from peers hash table (dict)
         self.peers.pop(peer.get_identity())
 
@@ -270,7 +279,7 @@ class PyreNode(object):
         if not grp:
             # somehow a dict containing peers is passed if
             # I don't force the peers arg to an empty dict
-            grp = PyreGroup(groupname, peers={})
+            grp = PyreGroup(self._name, groupname, peers={})
             self.peer_groups[groupname] = grp
 
         return grp
@@ -285,7 +294,7 @@ class PyreNode(object):
             peer.get_name().encode('utf-8'),
             groupname.encode('utf-8')
         ])
-        logger.debug("({0}) JOIN name={1} group={2}".format(self.name, peer.get_name(), groupname))
+        self.logger.debug("({0}) JOIN name={1} group={2}".format(self._name, peer.get_name(), groupname))
         return grp
 
     async def leave_peer_group(self, peer, groupname):
@@ -299,7 +308,7 @@ class PyreNode(object):
         # Now remove the peer from the group
         grp = self.require_peer_group(groupname)
         grp.leave(peer)
-        logger.debug("({0}) LEAVE name={1} group={2}".format(self.name, peer.get_name(), groupname))
+        self.logger.debug("({0}) LEAVE name={1} group={2}".format(self._name, peer.get_name(), groupname))
 
     # Here we handle messages coming from other peers
     async def run_router_receiver(self):
@@ -318,7 +327,7 @@ class PyreNode(object):
             # First frame is sender identity
             id = zmsg.id
             address = zmsg.get_address()
-            logger.debug(f"Received {zmsg.get_command()} Message from {address}")
+            self.logger.debug(f"Received {zmsg.get_command()} Message from {address}")
             # On HELLO we may create the peer if it's unknown
             # On other commands the peer must already exist
             peer = self.peers.get(address)
@@ -336,11 +345,11 @@ class PyreNode(object):
             
             # Ignore command if peer isn't ready
             if not peer or not peer.get_ready():
-                logger.warning("Peer {0} isn't ready".format(peer))
+                self.logger.warning("Peer {0} isn't ready".format(peer))
                 continue
 
             if peer.messages_lost(zmsg):
-                logger.warning("{0} messages lost from {1}".format(self.identity, peer.identity))
+                self.logger.warning("{0} messages lost from {1}".format(self._identity, peer.identity))
                 await self.remove_peer(peer)
                 continue
             
@@ -358,7 +367,7 @@ class PyreNode(object):
                     json.dumps(peer.get_headers()).encode('utf-8'),
                     peer.get_endpoint().encode('utf-8')
                 ])
-                logger.debug("({0}) ENTER name={1} endpoint={2}".format(self.name, peer.get_name(), peer.get_endpoint()))
+                self.logger.debug("({0}) ENTER name={1} endpoint={2}".format(self._name, peer.get_name(), peer.get_endpoint()))
 
                 # Join peer to listed groups
                 for grp in zmsg.get_groups():
@@ -400,7 +409,7 @@ class PyreNode(object):
                 if (match_data == self.filter):
                     is_valid = True
         
-        logger.debug(f"Received beacon [{frame}] from [{addr}]")
+        self.logger.debug(f"Received beacon [{frame}] from [{addr}]")
 
         #  If valid, discard our own broadcasts, which UDP echoes to us
         if is_valid and self.transmit:
@@ -412,7 +421,7 @@ class PyreNode(object):
             beacon = struct.unpack('cccb16sH', frame)
             # Ignore anything that isn't a valid beacon
             if beacon[3] != BEACON_VERSION:
-                logger.warning("Invalid ZRE Beacon version: {0}".format(beacon[3]))
+                self.logger.warning("Invalid ZRE Beacon version: {0}".format(beacon[3]))
                 return
 
             peer_id = uuid.UUID(bytes=beacon[4])
@@ -429,12 +438,12 @@ class PyreNode(object):
                 peer = self.peers.get(peer_id)
                 # remove the peer (delete)
                 if peer:
-                    logger.debug("Received 0 port beacon, removing peer {0}".format(peer_id))
+                    self.logger.debug("Received 0 port beacon, removing peer {0}".format(peer_id))
                     await self.remove_peer(peer)
 
                 else:
-                    logger.warning(self.peers)
-                    logger.warning("We don't know peer id {0}".format(peer_id))
+                    self.logger.warning(self.peers)
+                    self.logger.warning("We don't know peer id {0}".format(peer_id))
 
     # TODO: Handle gossip dat
 
@@ -444,14 +453,14 @@ class PyreNode(object):
     async def ping_peer(self, peer_id):
         peer = self.peers.get(peer_id)
         if time.time() > peer.expired_at:
-            logger.debug("({0}) peer expired name={1} endpoint={2}".format(self.name, peer.get_name(), peer.get_endpoint()))
+            self.logger.debug("({0}) peer expired name={1} endpoint={2}".format(self._name, peer.get_name(), peer.get_endpoint()))
             await self.remove_peer(peer)
         elif time.time() > peer.evasive_at:
             # If peer is being evasive, force a TCP ping.
             # TODO: do this only once for a peer in this state;
             # it would be nicer to use a proper state machine
             # for peer management.
-            logger.debug("({0}) peer seems dead/slow name={1} endpoint={2}".format(self.name, peer.get_name(), peer.get_endpoint()))
+            self.logger.debug("({0}) peer seems dead/slow name={1} endpoint={2}".format(self._name, peer.get_name(), peer.get_endpoint()))
             msg = ZreMsg(ZreMsg.PING)
             await peer.send(msg)
 

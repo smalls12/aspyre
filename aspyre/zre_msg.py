@@ -33,10 +33,7 @@ import logging
 
 STRING_MAX = 255
 
-logger = logging.getLogger(__name__)
-
-
-class ZreMsg(object):
+class ZreMsg():
 
     VERSION = 2
     HELLO   = 1
@@ -48,6 +45,7 @@ class ZreMsg(object):
     PING_OK = 7
 
     def __init__(self, id=None, *args, **kwargs):
+        self.logger = logging.getLogger("aspyre")
         self.address = ""
         self.id = id
         self.sequence = 0
@@ -70,7 +68,7 @@ class ZreMsg(object):
         try:
             self.address = uuid.UUID(bytes=self.address[1:])
         except ValueError:
-            logger.debug("Peer identity frame empty or malformed")
+            self.logger.debug("Peer identity frame empty or malformed")
             return None
 
         # Read and parse command in frame
@@ -80,13 +78,13 @@ class ZreMsg(object):
 
         # Get and check protocol signature
         if self._needle != 0:
-            logger.debug("Message already decoded for protocol signature")
+            self.logger.debug("Message already decoded for protocol signature")
 
         self._ceil = len(self.struct_data)
 
         signature = self._get_number2()
         if signature != (0xAAA0 | 1):
-            logger.debug("Invalid signature {0}".format(signature))
+            self.logger.debug("Invalid signature {0}".format(signature))
             return None
 
         # Get message id and parse per message type
@@ -94,7 +92,7 @@ class ZreMsg(object):
 
         version = self._get_number1()
         if version != 2:
-            logger.debug("Invalid version {0}".format(version))
+            self.logger.debug("Invalid version {0}".format(version))
             return None
 
         if self.id == ZreMsg.HELLO:
@@ -128,7 +126,7 @@ class ZreMsg(object):
             self.sequence = self._get_number2()
 
         else:
-            logger.debug("Message type {0} unknown".format(self.id))
+            self.logger.debug("Message type {0} unknown".format(self.id))
 
     # Send the zre_msg to the output, and destroy it
     def build(self):
@@ -174,7 +172,7 @@ class ZreMsg(object):
             self._put_number2(self.sequence)
 
         else:
-            logger.debug("Message type {0} unknown".format(self.id))
+            self.logger.debug("Message type {0} unknown".format(self.id))
 
         messages = []
        
@@ -246,7 +244,7 @@ class ZreMsg(object):
         return self.id
 
     def set_id(self, id):
-        logger.warning("E: set_id NOT IMPLEMENTED")
+        self.logger.warning("E: set_id NOT IMPLEMENTED")
 
     def get_command(self):
         if self.id == ZreMsg.HELLO:
@@ -457,6 +455,8 @@ class ZreMsg(object):
             self._put_long_string(val)
 
 if __name__ == '__main__':
+    logger = logging.getLogger(__name__)
+
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.DEBUG)
     # self._put_long_string("%s=%s" % (key, val))  # undefined: self, key, val

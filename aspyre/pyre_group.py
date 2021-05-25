@@ -1,23 +1,23 @@
 import logging
 
-logger = logging.getLogger(__name__)
-
 import asyncio
 
 import zmq.asyncio
 from zmq.asyncio import Context
 
-class PyreGroup(object):
+class PyreGroup():
 
-    def __init__(self, name, peers={}):
+    def __init__(self, name, groupname, peers={}):        
         self.name = name
+        self.logger = logging.getLogger("aspyre").getChild(self.name)
+        self.groupname = groupname
         # TODO perhaps warn if peers is not a set type
         self.peers = peers
 
     #def __del__(self):
 
     def __repr__(self):
-        ret = "GROUPNAME={0}:\n".format(self.name)
+        ret = "GROUPNAME={0}:\n".format(self.groupname)
         for key, val in self.peers.items():
             ret += "\t{0} {1}\n".format(key, val.name)
         return ret
@@ -34,7 +34,7 @@ class PyreGroup(object):
             self.peers.pop(peer.get_identity())
 
         else:
-            logger.debug("Peer {0} is not in group {1}.".format(peer, self.name))
+            self.logger.debug("Peer {0} is not in group {1}.".format(peer, self.groupname))
 
         peer.set_status(peer.get_status() + 1)
 
