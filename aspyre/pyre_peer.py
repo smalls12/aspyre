@@ -21,6 +21,7 @@ class PyrePeer():
         self.logger = logging.getLogger("aspyre").getChild(self.name)
         self.peer_name = "notset"     # Peer's public name
         self.origin = "unknown"  # Origin node's public name
+        self.pings_sent = 0
         self.evasive_at = 0      # Peer is being evasive
         self.expired_at = 0      # Peer has expired by now
         self.connected = False   # Peer will send messages
@@ -78,6 +79,22 @@ class PyrePeer():
             self.connected = False
             self.ready = False
     # end disconnect
+
+    async def send_ping(self, message):
+        """
+        increment the amount of pings sent
+        used to indicated SILENT vs EVASIVE
+        """
+        self.pings_sent += 1
+        await self.send(message)
+
+    def receive_ping_ok(self):
+        """
+        receiving a pink_ok resets the counter back down to 0
+        ie. even if we send 7 pings
+        a single pink_ok will reset
+        """
+        self.pings_sent = 0
 
     # Send message to peer
     async def send(self, msg):

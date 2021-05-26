@@ -467,6 +467,8 @@ class PyreNode():
                 ] + zmsg.content)
             elif message_id == ZreMsg.PING:
                 await peer.send(ZreMsg(id=ZreMsg.PING_OK))
+            elif message_id == ZreMsg.PING_OK:
+                peer.receive_ping_ok()
             elif message_id == ZreMsg.JOIN:
                 await self.join_peer_group(peer, zmsg.get_group())
                 assert zmsg.get_status() == peer.get_status()
@@ -542,9 +544,23 @@ class PyreNode():
             # TODO: do this only once for a peer in this state;
             # it would be nicer to use a proper state machine
             # for peer management.
+
+            # going to send a ping to the client
+            # if we still have yet to receive an OK from previous
+            # ping(s) then client is being evasive
+            if peer.pings_sent != 0:
+                await self._outbox.send_multipart([
+                    "SILENT".encode('utf-8'),
+                    peer.get_identity().bytes,
+                    peer.get_name().encode('utf-8')])
+            else:
+                await self._outbox.send_multipart([
+                    "EVASIVE".encode('utf-8'),
+                    peer.get_identity().bytes,
+                    peer.get_name().encode('utf-8')])
+
             self._logger.debug(f"({self._name}) peer seems dead/slow name={peer.get_name()} endpoint={peer.get_endpoint()}")
-            msg = ZreMsg(ZreMsg.PING)
-            await peer.send(msg)
+            await peer.send_ping(ZreMsg(ZreMsg.PING))
 
     # --------------------------------------------------------------------------
     # This is the actor that runs a single node; it uses one thread, creates
