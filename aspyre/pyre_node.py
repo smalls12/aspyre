@@ -466,7 +466,7 @@ class PyreNode():
                     zmsg.get_group().encode('utf-8')
                 ] + zmsg.content)
             elif message_id == ZreMsg.PING:
-                peer.send(ZreMsg(id=ZreMsg.PING_OK))
+                await peer.send(ZreMsg(id=ZreMsg.PING_OK))
             elif message_id == ZreMsg.JOIN:
                 await self.join_peer_group(peer, zmsg.get_group())
                 assert zmsg.get_status() == peer.get_status()

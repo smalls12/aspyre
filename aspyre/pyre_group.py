@@ -2,6 +2,7 @@
 string
 """
 import logging
+import asyncio
 
 class PyreGroup():
     """
