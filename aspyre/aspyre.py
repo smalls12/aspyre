@@ -1,3 +1,7 @@
+"""
+this is the user facing API
+"""
+
 import uuid
 import logging
 import asyncio
@@ -5,12 +9,41 @@ import zmq.asyncio
 from zmq.asyncio import Context
 
 # local modules
-from .pyre_node import PyreNode
+from .peer_database import PeerDatabase
+from .group_database import GroupDatabase
+
+from .zbeacon import AspyreAsyncBeacon, BeaconInterfaceUtility
+from .router import AspyreNodeRouterSocket, AspyreNodeAsyncRouter
+from .reaper import AspyreAsyncReaper
+
+from .pyre_node import AspyreAsyncNode
 from .pyre_event import PyreEvent
 
-class Pyre():
+ZRE_DISCOVERY_PORT = 5670
 
-    def __init__(self, name=None, ctx=None):
+default_config = {
+    "config": {
+        "general": {
+            "identity": None,
+            "name": None,
+            "ctx": None,
+            "headers": None
+        },
+        "beacon": {
+            "interface_name": "lo",
+            "port": ZRE_DISCOVERY_PORT,
+            "interval": 1
+        }
+    }
+    
+}
+
+class Aspyre():
+    """
+    responsible for constructing the various components of an aspyre
+    instance.
+    """
+    def __init__(self, **kwargs):
         """Constructor, creates a new Zyre node. Note that until you start the
         node it is silent and invisible to other nodes on the network.
         The node name is provided to other nodes during discovery. If you
@@ -22,21 +55,46 @@ class Pyre():
         Kwargs:
             ctx: PyZMQ Context, if not specified a new context will be created
         """
-        self._identity = uuid.uuid4()
-        self._name = name
-        if self._name is None:
-            self._name = str(self._identity)[:6]
-        self._logger = logging.getLogger("aspyre").getChild(self._name)
+        self._config = default_config
+        try:
+            for _name, _data in kwargs["config"]["general"].items():
+                self._config["config"]["general"][_name] = _data
+        except KeyError:
+            pass
+        
+        try:
+            for _name, _data in kwargs["config"]["beacon"].items():
+                self._config["config"]["beacon"][_name] = _data
+        except KeyError:
+            pass
+          
+        self._config["config"]["general"]["identity"] = uuid.uuid4()
 
-        self._ctx = ctx
-        if ctx is None:
-            self._ctx = Context.instance()
+        if self._config["config"]["general"]["name"] is None:
+            self._config["config"]["general"]["name"] = str(self._config["config"]["general"]["identity"])[:6]
+            
+        self._logger = logging.getLogger("aspyre").getChild(self._config["config"]["general"]["name"])
+
+        if self._config["config"]["general"]["ctx"] is None:
+            self._config["config"]["general"]["ctx"] = Context.instance()
+        
         self._node = None
+        self._interface = None
+
         self._inbox = None
+        self._outbox = None
+
         self._listening = False
 
+        self._own_groups = None
+        self._peers = None
+        self._peer_groups = None
+
+        self._running = None
+        self._running_task = None
+
     async def __aenter__(self):
-        return await self.start()
+        return await self.run()
 
     async def __aexit__(self, type, value, traceback):
         await self.stop()
@@ -52,49 +110,103 @@ class Pyre():
     def name(self):
         """Return our node name, after successful initialization"""
         return self._name
+    
+    async def run(self):
+        # check for interface
+        _beaconInterfaceUtility = BeaconInterfaceUtility(**self._config)
+        self._interface = _beaconInterfaceUtility.find_interface(self._config["config"]["beacon"]["interface_name"])
 
-    def set_header(self, key, value):
-        """Set node header; these are provided to other nodes during discovery
-        and come in each ENTER message."""
-        self._node.headers.update({key: value})
+        self.start(self._interface)
 
-    def set_port(self, port_nbr):
-        """Set UDP beacon discovery port; defaults to 5670, this call overrides
-        that so you can create independent clusters on the same network, for
-        e.g. development vs. production. Has no effect after zyre_start()."""
-        self._node.beacon_port = port_nbr
+        self._running = True
+        self._running_task = asyncio.create_task(self._node.run(self._interface))
 
-    def set_interval(self, interval):
-        """Set UDP beacon discovery interval, in milliseconds. Default is instant
-        beacon exploration followed by pinging every 1,000 msecs."""
-        self._node.interval = interval
+        return self
 
-    def set_interface(self, value):
-        """Set network interface for UDP beacons. If you do not set this, CZMQ will
-        choose an interface for you. On boxes with several interfaces you should
-        specify which one you want to use, or strange things can happen."""
-        self._logger.debug("set_interface not implemented") #TODO
-
-    async def start(self):
+    def start(self, interface):
         """Start node, after setting header values. When you start a node it
         begins discovery and connection. Returns 0 if OK, -1 if it wasn't
         possible to start the node."""
-        self._node = PyreNode(self._identity, self._name)
+        # build router socket
+        _router_socket = AspyreNodeRouterSocket(
+            interface,
+            **self._config
+        )
 
-        self._inbox = self._ctx.socket(zmq.PULL)
-        self._inbox.connect(f"inproc://events-{self._identity}")
+        # build node outbox
+        self._outbox = self._config["config"]["general"]["ctx"].socket(zmq.PUSH)
+        self._outbox.bind("inproc://events-{}".format(self._config["config"]["general"]["identity"]))
 
-        await self._node.start()
+        # build node inbox
+        self._inbox = self._config["config"]["general"]["ctx"].socket(zmq.PULL)
+        self._inbox.connect("inproc://events-{}".format(self._config["config"]["general"]["identity"]))
 
-        return self
+        # build database of groups we belong to
+        self._own_groups = GroupDatabase(
+            **self._config
+        )
+
+        # build database of groups peers belong to
+        self._peer_groups = GroupDatabase(
+            **self._config
+        )
+
+        # build peer database
+        self._peers = PeerDatabase(
+            _router_socket,     # seemingly unneccesary
+                                # used in the HELLO message
+                                # used for filtering a scenario that might never happen?
+            self._outbox,       # the channel back to the user
+            self._own_groups,   # the groups this node is joined to
+            self._peer_groups,  # the groups peers are joined to
+            **self._config      # other node configuration details
+        )
+
+        # build the beacon
+        _beacon = AspyreAsyncBeacon(
+            _router_socket,     # the beacon needs to know the router endpoint port for broadcasting
+            self._peers,        # the beacon will add and remove peers based off of the beacons
+                                # it receives
+            **self._config      # other node configuration details
+        )
+
+        # build router
+        _router = AspyreNodeAsyncRouter(
+            _router_socket,     # take the router socket and wrap it for send/receive
+            self._outbox,       # the channel back to the user 
+            self._peers,        # the HELLO could come in before the beacon
+                                # will create peers in this case
+            self._peer_groups,
+            **self._config      # other node configuration details
+        )
+
+        # build reaper
+        _reaper = AspyreAsyncReaper(
+            self._peers,        # check every peer if it needs to be ping'd
+            **self._config      # other node configuration details
+        )
+
+        # build node
+        print(self._config)
+        self._node = AspyreAsyncNode(
+            _beacon,
+            _router,
+            _reaper,
+            self._outbox,
+            self._own_groups,
+            self._peers,
+            self._peer_groups,
+            **self._config      # other node configuration details
+        )
 
     async def stop(self):
         """Stop node; this signals to other peers that this node will go away.
         This is polite; however you can also just destroy the node without
         stopping it."""
-        if self._node.engine_running:
+        if self._running:
             await self._node.stop()
-            self._inbox.disconnect(f"inproc://events-{self._identity}")
+            await self._running_task
+            self._inbox.disconnect("inproc://events-{}".format(self._config["config"]["general"]["identity"]))
 
     '''
     this will block the caller
@@ -105,7 +217,7 @@ class Pyre():
     '''
     async def listen(self, receiver):
         self._listening = True
-        while self._node.engine_running and self._listening:
+        while self._listening:
             try:
                 await receiver(self, await self.recv())
             except asyncio.TimeoutError:
@@ -146,11 +258,11 @@ class Pyre():
 
     def get_peers(self):
         """Return list of current peer ids."""
-        return self._node.get_peers()
+        return list(self._peers.peers.keys())
 
     def peers_by_group(self, groupname):
         """Return list of current peer ids."""
-        return list(self._node.require_peer_group(groupname).peers.keys())
+        return list(self._node._peer_groups[groupname].peers.keys())
 
     def endpoint(self):
         """Return own endpoint"""
@@ -158,22 +270,22 @@ class Pyre():
 
     def peer_address(self, peer):
         """Return the endpoint of a connected peer."""
-        return self._node.peers.get(peer).get_endpoint()
+        return self._peers.peers.get(peer).get_endpoint()
 
     def peer_header_value(self, peer, name):
         """Return the value of a header of a conected peer.
         Returns null if peer or key doesn't exist."""
-        return self._node.peers.get(peer).get_header(name)
+        return self._peers.peers.get(peer).get_header(name)
 
     def peer_headers(self, peer):
         """Return the value of a header of a conected peer.
         Returns null if peer or key doesn't exist."""
-        return self._node.peers.get(peer).get_headers()
+        return self._peers.peers.get(peer).get_headers()
 
     def own_groups(self):
         """Return list of currently joined groups."""
-        return list(self._node.own_groups.keys())
+        return list(self._own_groups.groups.keys())
 
     def peer_groups(self):
         """Return list of groups known through connected peers."""
-        return list(self._node.peer_groups.keys())
+        return list(self.peer_groups.groups.keys())

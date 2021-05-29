@@ -21,7 +21,7 @@ async def client_receiver(node, message):
 
 async def client():
     # this will automatically start the pyre engine
-    async with aspyre.Pyre() as node:
+    async with aspyre.Aspyre() as node:
         await node.join(GROUP)
         await asyncio.sleep(1.0)
         try:
@@ -39,7 +39,7 @@ async def server_receiver(node, message):
 
 async def server():
     # this will automatically start the pyre engine
-    async with aspyre.Pyre() as node:
+    async with aspyre.Aspyre() as node:
         await node.join(GROUP)
         await asyncio.sleep(1.0)
         await node.shout(GROUP, MESSAGE)

@@ -6,7 +6,7 @@ import asyncio
 import zmq.asyncio
 from zmq.asyncio import Context
 
-class PyrePeer():
+class AspyrePeer():
 
     PEER_EXPIRED = 30              # expire after 10s
     PEER_EVASIVE = 10              # mark evasive after 5s
@@ -54,7 +54,7 @@ class PyrePeer():
         self.mailbox.setsockopt(zmq.LINGER, 0)
         self.mailbox.setsockopt(zmq.IDENTITY, b'\x01' + reply_to.bytes)
         # Set a high-water mark that allows for reasonable activity
-        self.mailbox.setsockopt(zmq.SNDHWM, PyrePeer.PEER_EXPIRED * 100)
+        self.mailbox.setsockopt(zmq.SNDHWM, AspyrePeer.PEER_EXPIRED * 100)
         # Send messages immediately or return EAGAIN
         self.mailbox.setsockopt(zmq.SNDTIMEO, 0)
 

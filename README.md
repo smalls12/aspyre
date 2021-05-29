@@ -46,7 +46,7 @@ async def receiver(node, message):
 
 async def main():
     # this will automatically start the pyre engine
-    async with aspyre.Pyre() as node:               
+    async with aspyre.Aspyre() as node:               
         await node.join("blah")
         try:
             try:

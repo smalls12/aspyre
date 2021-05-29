@@ -46,39 +46,249 @@ MULTICAST_GRP = '225.25.25.25'
 ENETDOWN = 50   #socket error, network is down
 ENETUNREACH = 51 #socket error, network unreachable
 
-class ZAsyncBeacon():
+class BeaconInterface():
+    def __init__(self, address, network_address, broadcast_address, interface_name):
+        self.address = address
+        self.network_address = network_address
+        self.broadcast_address = broadcast_address
+        self.interface_name = interface_name
 
-    def __init__(self, name, *args, **kwargs):
-        self.name = name
+class BeaconInterfaceUtility():
+    def __init__(self, **kwargs):
+        self.name = kwargs["config"]["general"]["name"]
         self.logger = logging.getLogger("aspyre").getChild(self.name)
+    
+    def find_interface(self, interface_name):
+        return self._find_interface(interface_name)
+    
+    def _validate_interface(self, name, data):
+        self.logger.debug("Checking out interface {0}.".format(name))
+        # For some reason the data we need lives in the "2" section of the interface.
+        data_2 = data.get(2)
+
+        if not data_2:
+            self.logger.debug("No data_2 found for interface {0}.".format(name))
+            return None
+
+        address_str = data_2.get("addr")
+        netmask_str = data_2.get("netmask")
+
+        if not address_str or not netmask_str:
+            self.logger.debug("Address or netmask not found for interface {0}.".format(name))
+            return None
+
+        if isinstance(address_str, bytes):
+            address_str = address_str.decode("utf8")
+
+        if isinstance(netmask_str, bytes):
+            netmask_str = netmask_str.decode("utf8")
+
+        interface_string = "{0}/{1}".format(address_str, netmask_str)
+
+        interface = ipaddress.ip_interface(u(interface_string))
+
+        if interface.is_link_local:
+            self.logger.debug("Interface {0} is a link-local device.".format(name))
+            return None
+
+        return BeaconInterface(interface.ip, interface.network.network_address, interface.network.broadcast_address, name)
+
+    def _find_interface(self, interface_name):
+        netinf = zhelper.get_ifaddrs()
+
+        self.logger.debug("Available interfaces: {0}".format(netinf))
+
+        # try and find selected interface
+        for iface in netinf:
+            for _name, _data in iface.items():
+                if _name == interface_name:
+                    # found chosen interface
+                    valid = self._validate_interface(_name, _data)
+                    if valid is not None:
+                        return valid
+                    else:
+                        self.logger.error(f"Unable to use interface [{interface_name}]")
+        
+        self.logger.warning("Searching for any avilable NIC")
+
+        # just find any available interface
+        for iface in netinf:
+            # Loop over the interfaces and their settings to try to find the broadcast address.
+            # ipv4 only currently and needs a valid broadcast address
+            for name, data in iface.items():
+                if self._validate_interface(name, data):
+                    return
+        
+        raise Exception("No avilable NICs")
+
+class AspyreAsyncBeaconReceiver():
+    """
+    string
+    """
+    def __init__(self, name, transmit, peers):
+        """
+        string
+        """
+        self._name = name
+        self._logger = logging.getLogger("aspyre").getChild(self._name)
+
+        self._transmit = transmit
+        self._filter = struct.pack("ccc", b'Z', b'R', b'E')
+
+        self._peers = peers
+
+    def connection_made(self, _):
+        """
+        string
+        """
+        self._logger.debug("connection made")
+    
+    @property
+    def transmit(self):
+        """
+        we want to provide access to the transmit variable so
+        that we can set it to the zeroized beacon
+        """
+        return self._transmit
+    
+    @transmit.setter
+    def transmit(self, transmit):
+        """
+        we want to provide access to the transmit variable so
+        that we can set it to the zeroized beacon
+        """
+        self._transmit = transmit
+
+    def datagram_received(self, frame, addr):
+        """
+        string
+        """       
+        #  If filter is set, check that beacon matches it
+        is_valid = False
+        if self._filter is not None:
+            if len(self._filter) <= len(frame):
+                match_data = frame[:len(self._filter)]
+                if match_data == self._filter:
+                    is_valid = True
+
+        self._logger.debug(f"Received beacon [{frame}] from [{addr}]")
+
+        #  If valid, discard our own broadcasts, which UDP echoes to us
+        if is_valid and self._transmit:
+            if frame == self._transmit:
+                is_valid = False
+
+        #  If still a valid beacon, send on to the API
+        if is_valid:
+            # even though this is async
+            # it doesn't have the async wrapping
+            # we'll need to throw this at asyncio to get a task
+            asyncio.create_task(self._process_beacon(frame, addr))
+
+    async def _process_beacon(self, frame, addr):
+        beacon = struct.unpack('cccb16sH', frame)
+        # Ignore anything that isn't a valid beacon
+        if beacon[3] != BEACON_VERSION:
+            self._logger.warning("Invalid ZRE Beacon version: {0}".format(beacon[3]))
+            return
+
+        peer_id = uuid.UUID(bytes=beacon[4])
+        #print("peerId: %s", peer_id)
+        port = socket.ntohs(beacon[5])
+        # if we receive a beacon with port 0 this means the peer exited
+        if port:
+            endpoint = "tcp://%s:%d" %(addr[0], port)
+            peer = await self._peers.require_peer(peer_id, endpoint)
+            peer.refresh()
+        else:
+            # Zero port means peer is going away; remove it if
+            # we had any knowledge of it already
+            peer = self._peers.peers.get(peer_id)
+            # remove the peer (delete)
+            if peer:
+                self._logger.debug("Received 0 port beacon, removing peer {0}".format(peer_id))
+                await self._peers.remove_peer(peer)
+
+            else:
+                self._logger.warning(self._peers)
+                self._logger.warning("We don't know peer id {0}".format(peer_id))
+
+    def error_received(self, exc):
+        """
+        string
+        """
+        self._logger.error(f"Error received: {exc}")
+
+    def connection_lost(self, exc):
+        """
+        string
+        """
+        self._logger.error(f"Connection closed :: {exc}")
+
+class AspyreAsyncBeacon():
+
+    def __init__(self, router, peers, **kwargs):
+        self.name = kwargs["config"]["general"]["name"]
+        self._identity = kwargs["config"]["general"]["identity"]
+        self.logger = logging.getLogger("aspyre").getChild(self.name)
+
+        self._router = router
+
+        self._peers = peers
+
         self.udpsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
                                       #  UDP socket for send/recv
 
-        self.port_nbr = 0             #  UDP port number we work on
+        self.port_nbr = kwargs["config"]["beacon"]["port"]             #  UDP port number we work on
         self.interval = INTERVAL_DFLT #  Beacon broadcast interval
         self.ping_at = time.time()    #  Next broadcast time
 
-        self.terminated = False       #  Did caller ask us to quit?
+        self._terminated = False       #  Did caller ask us to quit?
         self.hostname = ""            #  Saved host name
+
+        self._interface_name = kwargs["config"]["beacon"]["interface_name"]
 
         self.address = None
         self.network_address = None
         self.broadcast_address = None
-        self.interface_name = None
-
-    def __del__(self):
-        if self.udpsock:
+    
+    async def run(self, interface):
+        self.start(interface)
+        try:
+            _transmit = struct.pack('cccb16sH', b'Z', b'R', b'E',
+                                     BEACON_VERSION, self._identity.bytes,
+                                     socket.htons(self._router.port))
+            
+            _beaconReceiver = AspyreAsyncBeaconReceiver(self.name, _transmit, self._peers)
+            
+            # this will receive asynchronously on its own
+            _transport, _protocol = await asyncio.get_event_loop().create_datagram_endpoint(
+                lambda: _beaconReceiver,
+                sock=self.udpsock)
+            
+            while not self._terminated:
+                # keep looping
+                # send the beacon at interval
+                await self.send_beacon(interface, _transport, _transmit)
+                # sleep interval
+                await asyncio.sleep(1.0)
+        finally:
+            # we still want to force out one last beacon to inform peers
+            # we are leaving
+            _transmit = struct.pack('cccb16sH', b'Z', b'R', b'E',
+                                        BEACON_VERSION, self._identity.bytes,
+                                        socket.htons(0))
+            _beaconReceiver.transmit = _transmit
+            await self.send_beacon(interface, _transport, _transmit)
             self.udpsock.close()
     
-    def start(self, identity, port_nbr):
-        self.port_nbr = port_nbr
-        self.prepare_udp()
+    def start(self, interface):
+        self._bind_interface(interface)
 
-    def stop(self, identity):
-        pass
-
-    def prepare_udp(self):
-        self._prepare_socket()
+    def stop(self):
+        self._terminated = True
+    
+    def _bind_interface(self, interface):
         try:
             self.udpsock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             self.udpsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -91,7 +301,7 @@ class ZAsyncBeacon():
             except AttributeError:
                 pass
 
-            if self.broadcast_address.is_multicast:
+            if interface.broadcast_address.is_multicast:
                 # TTL
                 self.udpsock.setsockopt(socket.IPPROTO_IP,
                                         socket.IP_MULTICAST_TTL, 2)
@@ -121,7 +331,7 @@ class ZAsyncBeacon():
                 #       socket.inet_aton("225.25.25.25") + socket.inet_aton(host))
                 self.udpsock.bind(("", self.port_nbr))
 
-                group = socket.inet_aton("{0}".format(self.broadcast_address))
+                group = socket.inet_aton("{0}".format(interface.broadcast_address))
                 mreq = struct.pack('4sl', group, socket.INADDR_ANY)
 
                 self.udpsock.setsockopt(socket.SOL_IP,
@@ -132,94 +342,19 @@ class ZAsyncBeacon():
                 if platform.startswith("linux"):
                     # on linux we bind to the broadcast address and send to
                     # the broadcast address
-                    self.udpsock.bind((str(self.broadcast_address),
+                    self.udpsock.bind((str(interface.broadcast_address),
                                        self.port_nbr))
                 else:
                     self.udpsock.bind(("", self.port_nbr))
 
-                self.logger.debug("Set up a broadcast beacon to {0}:{1}".format(self.broadcast_address, self.port_nbr))
+                self.logger.debug("Set up a broadcast beacon to {0}:{1}".format(interface.broadcast_address, self.port_nbr))
         except socket.error:
             self.logger.exception("Initializing of {0} raised an exception".format(self.__class__.__name__))
-
-    def _prepare_socket(self):
-        netinf = zhelper.get_ifaddrs()
-
-        self.logger.debug("Available interfaces: {0}".format(netinf))
-
-        for iface in netinf:
-            # Loop over the interfaces and their settings to try to find the broadcast address.
-            # ipv4 only currently and needs a valid broadcast address
-            for name, data in iface.items():
-                self.logger.debug("Checking out interface {0}.".format(name))
-                # For some reason the data we need lives in the "2" section of the interface.
-                data_2 = data.get(2)
-
-                if not data_2:
-                    self.logger.debug("No data_2 found for interface {0}.".format(name))
-                    continue
-
-                address_str = data_2.get("addr")
-                netmask_str = data_2.get("netmask")
-
-                if not address_str or not netmask_str:
-                    self.logger.debug("Address or netmask not found for interface {0}.".format(name))
-                    continue
-
-                if isinstance(address_str, bytes):
-                    address_str = address_str.decode("utf8")
-
-                if isinstance(netmask_str, bytes):
-                    netmask_str = netmask_str.decode("utf8")
-
-                interface_string = "{0}/{1}".format(address_str, netmask_str)
-
-                interface = ipaddress.ip_interface(u(interface_string))
-
-                if interface.is_loopback:
-                    self.logger.debug("Interface {0} is a loopback device.".format(name))
-                    continue
-
-                if interface.is_link_local:
-                    self.logger.debug("Interface {0} is a link-local device.".format(name))
-                    continue
-
-                self.address = interface.ip
-                self.network_address = interface.network.network_address
-                self.broadcast_address = interface.network.broadcast_address
-                self.interface_name = name
-
-            if self.address:
-                break
-
-        self.logger.debug("Finished scanning interfaces.")
-
-        if not self.address:
-            self.network_address = ipaddress.IPv4Address(u('127.0.0.1'))
-            self.broadcast_address = ipaddress.IPv4Address(u(MULTICAST_GRP))
-            self.interface_name = 'loopback'
-            self.address = u('127.0.0.1')
-
-        self.logger.debug("Address: {0}".format(self.address))
-        self.logger.debug("Network: {0}".format(self.network_address))
-        self.logger.debug("Broadcast: {0}".format(self.broadcast_address))
-        self.logger.debug("Interface name: {0}".format(self.interface_name))
-
-    def set_port(self, port_nbr):
-        self.port_nbr = port_nbr
     
-    def get_address(self):
-        return self.address
-    
-    def get_socket(self):
-        return self.udpsock
-    
-    def send_term(self):
-        self.terminated = True
-
-    async def send_beacon(self, transport, data):
-        self.logger.debug(f"Send beacon [{data}] from [{(str(self.broadcast_address), self.port_nbr)}]")
+    async def send_beacon(self, interface, transport, data):
+        self.logger.debug(f"Send beacon [{data}] from [{(str(interface.broadcast_address), self.port_nbr)}]")
         try:
-            transport.sendto(data, (str(self.broadcast_address), self.port_nbr))
+            transport.sendto(data, (str(interface.broadcast_address), self.port_nbr))
         except OSError as e:
             
             # network down, just wait, it could come back up again.
@@ -231,9 +366,8 @@ class ZAsyncBeacon():
             # all other cases, we'll terminate
             else:
                 self.logger.debug("Network seems gone, exiting zbeacon")
-                self.terminated = True
+                self._terminated = True
                 
         except socket.error:
             self.logger.debug("Network seems gone, exiting zbeacon")
-            self.terminated = True
-
+            self._terminated = True

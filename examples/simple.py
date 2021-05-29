@@ -14,8 +14,8 @@ async def receiver(node, message):
 
 async def main():
     # this will automatically start the pyre engine
-    async with aspyre.Pyre() as node:               
-        await node.join("blah")
+    async with aspyre.Aspyre() as node:               
+        await node.join("CHAT")
         try:
             try:
                 # run aspyre for 10 seconds
@@ -23,8 +23,7 @@ async def main():
             except asyncio.TimeoutError:
                 pass
         finally:
-            # await work_task
-            await node.leave("blah")
+            await node.leave("CHAT")
 
 if __name__ == '__main__':
     FORMAT = '%(asctime)s - %(name)s - %(filename)s:%(lineno)d - %(levelname)s - %(message)s'

@@ -3,19 +3,19 @@ import json
 
 class PyreEvent():
     """
-    Parsing Pyre messages
+    Parsing Aspyre messages
 
-    This class provides a higher-level API to the Pyre.recv() call, by doing
+    This class provides a higher-level API to the Aspyre.recv() call, by doing
     work that you will want to do in many cases, such as unpacking the peer
     headers for each ENTER event received.
     """
     def __init__(self, node):
         """
-        Constructor, creates a new Pyre event.
-        Receive an event from the Pyre node, wraps Pyre.recv.
+        Constructor, creates a new Aspyre event.
+        Receive an event from the Aspyre node, wraps Aspyre.recv.
 
         Args:
-            node (Pyre): Pyre node
+            node (Aspyre): Aspyre node
         """
         super(PyreEvent, self).__init__()
         incoming = node.recv()

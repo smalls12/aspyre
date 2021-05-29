@@ -14,8 +14,8 @@ async def work(node):
     await asyncio.sleep(1)
     try:
         peers = node.get_peers()
-        peer = list(peers)[0]
-        print(node.peer_address(peer))
+        peer = peers[0]
+        print(f"Peer Address :: {node.peer_address(peer)}")
         await node.whisper(list(peers)[0], b"look at this whisper message")
     except IndexError as e:
         pass
@@ -25,7 +25,7 @@ async def receiver(node, message):
 
 async def main():
     # this will automatically start the pyre engine
-    async with aspyre.Pyre() as node:               
+    async with aspyre.Aspyre() as node:               
         await node.join("blah")
         try:
             tasks = [

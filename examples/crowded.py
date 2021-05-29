@@ -1,12 +1,11 @@
-'''
+"""
 lots of clients ( crowded )
 
 start the server ( where SHOUT message originates )
 shut down once all clients receive the SHOUT
-'''
+"""
 
 import logging
-import uuid
 import asyncio
 import aspyre
 
@@ -19,7 +18,7 @@ async def client_receiver(node, message):
 
 async def client():
     # this will automatically start the pyre engine
-    async with aspyre.Pyre() as node:
+    async with aspyre.Aspyre() as node:
         await node.join(GROUP)
         try:
             # need some time to allow for convergence
@@ -28,13 +27,12 @@ async def client():
             # run aspyre for 10 seconds
             await asyncio.wait_for(node.listen(client_receiver), timeout=10)
         finally:
-            # await work_task
             await node.leave(GROUP)
 
 async def server():
     # this will automatically start the pyre engine
-    async with aspyre.Pyre() as node:
-        await node.join(GROUP)        
+    async with aspyre.Aspyre() as node:
+        await node.join(GROUP)
         try:
             # need some time to allow for convergence
             await asyncio.sleep(1.0)
@@ -44,7 +42,6 @@ async def server():
             # to receiving the message
             await asyncio.sleep(1.0)
         finally:
-            # await work_task
             await node.leave(GROUP)
 
 async def main():
@@ -52,7 +49,7 @@ async def main():
         server()
     ]
 
-    [tasks.append(client()) for x in range(7)]
+    [tasks.append(client()) for x in range(20)]
 
     await asyncio.gather(*tasks)
 
