@@ -76,7 +76,7 @@ class AspyreAsyncNode():
             tasks = [
                 self._beacon.run(interface),         # periodically send beacon
                 self._reaper.run(),         # periodically poke peers
-                self._router.run(interface)          # receive incoming messages from peers
+                self._router.run()          # receive incoming messages from peers
             ]
 
             # this method will block the current task until

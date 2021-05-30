@@ -4,12 +4,12 @@ import logging
 
 from .message import ZreMsg
 
-REAP_INTERVAL = 1.0  # Once per second
-
 class AspyreAsyncReaper():
     def __init__(self, peers, **kwargs):
         self._name = kwargs["config"]["general"]["name"]
         self._logger = logging.getLogger("aspyre").getChild(self._name)
+
+        self._interval = kwargs["config"]["reaper"]["interval"]
 
         self._terminated = False
         self._peers = peers
@@ -26,7 +26,7 @@ class AspyreAsyncReaper():
             for peer_id in self._peers.peers.copy().keys():
                 await self.ping_peer(peer_id)
             # sleep interval
-            await asyncio.sleep(REAP_INTERVAL)
+            await asyncio.sleep(self._interval)
 
     def start(self, interface):
         pass

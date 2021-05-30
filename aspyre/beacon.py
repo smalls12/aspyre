@@ -40,7 +40,6 @@ from zmq.asyncio import Context
 
 BEACON_VERSION = 1
 
-INTERVAL_DFLT = 1.0
 BEACON_MAX = 255      # Max size of beacon data
 MULTICAST_GRP = '225.25.25.25'
 ENETDOWN = 50   #socket error, network is down
@@ -240,7 +239,7 @@ class AspyreAsyncBeacon():
                                       #  UDP socket for send/recv
 
         self.port_nbr = kwargs["config"]["beacon"]["port"]             #  UDP port number we work on
-        self.interval = INTERVAL_DFLT #  Beacon broadcast interval
+        self.interval = kwargs["config"]["beacon"]["interval"]  #  Beacon broadcast interval
         self.ping_at = time.time()    #  Next broadcast time
 
         self._terminated = False       #  Did caller ask us to quit?

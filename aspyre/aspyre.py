@@ -19,6 +19,9 @@ from .node import AspyreAsyncNode
 from .pyre_event import PyreEvent
 
 ZRE_DISCOVERY_PORT = 5670
+BEACON_TRANSMIT_INTERVAL = 1.0
+
+REAPING_INTERVAL = 1.0
 
 default_config = {
     "config": {
@@ -29,9 +32,15 @@ default_config = {
             "headers": None
         },
         "beacon": {
-            "interface_name": "lo",
+            "interface_name": "eth0",
             "port": ZRE_DISCOVERY_PORT,
-            "interval": 1
+            "interval": BEACON_TRANSMIT_INTERVAL
+        },
+        "reaper": {
+            "interval": REAPING_INTERVAL
+        },
+        "router": {
+
         }
     }
     

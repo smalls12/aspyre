@@ -37,7 +37,7 @@ class AspyreNodeRouterSocket():
         except AttributeError as e:
             self._logger.warning(f"ROUTER_HANDOVER needs zmq version >=4.1 but installed is {zmq.zmq_version()}")
 
-        self._port = self._inbox.bind_to_random_port("tcp://*")
+        self._port = self._inbox.bind_to_random_port(f"tcp://{interface.address}")
         if self._port < 0:
             # Die on bad interface or port exhaustion
             raise Exception("Random port assignment for incoming messages failed.")
@@ -77,9 +77,9 @@ class AspyreNodeAsyncRouter():
 
         self._terminated = False
 
-    async def run(self, interface):
+    async def run(self):
         """continuously receives on the socket"""
-        self.start(interface)
+        self.start()
 
         while not self._terminated:
             self._logger.debug("Receiving...")
@@ -90,7 +90,7 @@ class AspyreNodeAsyncRouter():
             except asyncio.TimeoutError:
                 continue
 
-    def start(self, interface):
+    def start(self):
         """any setup required prior to running"""
         pass
 
