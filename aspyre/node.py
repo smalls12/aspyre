@@ -15,8 +15,8 @@ from zmq.asyncio import Context
 
 from .zbeacon import AspyreAsyncBeacon
 from .zre_msg import ZreMsg
-from .pyre_peer import AspyrePeer
-from .pyre_group import PyreGroup
+from .peer import AspyrePeer
+from .group import PyreGroup
 
 # hmm ?
 # asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())

@@ -9,14 +9,13 @@ import zmq.asyncio
 from zmq.asyncio import Context
 
 # local modules
-from .peer_database import PeerDatabase
-from .group_database import GroupDatabase
+from .database import PeerDatabase, GroupDatabase
 
-from .zbeacon import AspyreAsyncBeacon, BeaconInterfaceUtility
+from .beacon import AspyreAsyncBeacon, BeaconInterfaceUtility
 from .router import AspyreNodeRouterSocket, AspyreNodeAsyncRouter
 from .reaper import AspyreAsyncReaper
 
-from .pyre_node import AspyreAsyncNode
+from .node import AspyreAsyncNode
 from .pyre_event import PyreEvent
 
 ZRE_DISCOVERY_PORT = 5670

@@ -1,7 +1,8 @@
 import logging
 
 from .zre_msg import ZreMsg
-from .pyre_peer import AspyrePeer
+from .peer import AspyrePeer
+from .group import PyreGroup
 
 class PeerDatabase():
     def __init__(self, socket, outbox, own_groups, peer_groups, **kwargs):
@@ -88,3 +89,31 @@ class PeerDatabase():
         
         # To destroy peer, we remove from peers hash table (dict)
         self._peers.pop(peer.get_identity())
+
+class GroupDatabase():
+    def __init__(self, **kwargs):
+        self._name = kwargs["config"]["general"]["name"]
+        self.logger = logging.getLogger("aspyre").getChild(self._name)
+        
+        self._groups = {}
+
+    @property
+    def groups(self):
+        """
+        string
+        """
+        return self._groups
+    
+    # Find or create group via its name
+    def require_group(self, groupname):
+        """
+        string
+        """
+        grp = self._groups.get(groupname)
+        if not grp:
+            # somehow a dict containing peers is passed if
+            # I don't force the peers arg to an empty dict
+            grp = PyreGroup(self._name, groupname, peers={})
+            self._groups[groupname] = grp
+
+        return grp
