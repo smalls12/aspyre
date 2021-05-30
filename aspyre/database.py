@@ -1,6 +1,6 @@
 import logging
 
-from .zre_msg import ZreMsg
+from .message import ZreMsg
 from .peer import AspyrePeer
 from .group import PyreGroup
 

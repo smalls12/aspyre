@@ -2,7 +2,7 @@ import asyncio
 import time
 import logging
 
-from .zre_msg import ZreMsg
+from .message import ZreMsg
 
 REAP_INTERVAL = 1.0  # Once per second
 

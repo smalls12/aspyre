@@ -12,7 +12,7 @@ import logging
 import asyncio
 import json
 
-from .zre_msg import ZreMsg
+from .message import ZreMsg
 
 class AspyreNodeRouterSocket():
     """

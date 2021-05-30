@@ -14,7 +14,7 @@ import zmq.asyncio
 from zmq.asyncio import Context
 
 from .zbeacon import AspyreAsyncBeacon
-from .zre_msg import ZreMsg
+from .message import ZreMsg
 from .peer import AspyrePeer
 from .group import PyreGroup
 
