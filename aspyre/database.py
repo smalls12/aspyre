@@ -5,14 +5,16 @@ from .peer import AspyrePeer
 from .group import PyreGroup
 
 class PeerDatabase():
-    def __init__(self, socket, outbox, own_groups, peer_groups, **kwargs):
+    def __init__(self, factory, endpoint, outbox, own_groups, peer_groups, **kwargs):
         self._name = kwargs["config"]["general"]["name"]
         self._identity = kwargs["config"]["general"]["identity"]
         self._logger = logging.getLogger("aspyre").getChild(self._name)
 
         self._ctx = kwargs["config"]["general"]["ctx"]
 
-        self._socket = socket
+        self._factory = factory
+
+        self._endpoint = endpoint
 
         self._outbox = outbox
 
@@ -42,8 +44,24 @@ class PeerDatabase():
             peer.disconnect()
             self._logger.debug("Purge peer: {0}{1}".format(peer, endpoint))
     
+    def _create_new_peer_connection(self, key=None):
+        return self._factory.get_socket(
+            self._ctx,
+            key
+        )
+    
+    async def _send_hello_to_new_peer(self, peer):
+        # Handshake discovery by sending HELLO as first message
+        _zmsg = ZreMsg(ZreMsg.HELLO)
+        _zmsg.set_endpoint(self._endpoint)
+        _zmsg.set_groups(self._own_groups.groups.keys())
+        _zmsg.set_status(self._status)
+        _zmsg.set_name(self._name)
+        _zmsg.set_headers(self._headers)
+        await peer.send(_zmsg)
+    
     # Find or create peer via its UUID string
-    async def require_peer(self, peer_identity, endpoint):
+    async def require_peer(self, peer_identity, endpoint, key=None):
         """
         string
         """
@@ -52,20 +70,15 @@ class PeerDatabase():
             # Purge any previous peer on same endpoint
             for _, __peer in self._peers.copy().items():
                 await self._purge_peer(__peer, endpoint)
+            
+            _socket = self._create_new_peer_connection(key)
 
-            _peer = AspyrePeer(self._ctx, self._name, peer_identity)
+            _peer = AspyrePeer(_socket, self._name, peer_identity)
             self._peers[peer_identity] = _peer
             _peer.set_origin(self._name)
             _peer.connect(self._identity, endpoint)
 
-            # Handshake discovery by sending HELLO as first message
-            _zmsg = ZreMsg(ZreMsg.HELLO)
-            _zmsg.set_endpoint(self._socket.endpoint)
-            _zmsg.set_groups(self._own_groups.groups.keys())
-            _zmsg.set_status(self._status)
-            _zmsg.set_name(self._name)
-            _zmsg.set_headers(self._headers)
-            await _peer.send(_zmsg)
+            await self._send_hello_to_new_peer(_peer)
 
         return _peer
     
@@ -89,6 +102,20 @@ class PeerDatabase():
         
         # To destroy peer, we remove from peers hash table (dict)
         self._peers.pop(peer.get_identity())
+
+class PeerNoEncryptionDatabase(PeerDatabase):
+    def __init__(self, factory, endpoint, outbox, own_groups, peer_groups, **kwargs):
+        super().__init__(factory, endpoint, outbox, own_groups, peer_groups, **kwargs)
+
+class PeerEncryptionDatabase(PeerDatabase):
+    def __init__(self, factory, endpoint, outbox, own_groups, peer_groups, **kwargs):
+        super().__init__(factory, endpoint, outbox, own_groups, peer_groups, **kwargs)
+
+    def _create_new_peer_connection(self, key=None):
+        return self._factory.get_socket(
+            self._ctx,
+            key
+        )
 
 class GroupDatabase():
     def __init__(self, **kwargs):

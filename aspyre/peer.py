@@ -11,10 +11,9 @@ class AspyrePeer():
     PEER_EXPIRED = 30              # expire after 10s
     PEER_EVASIVE = 10              # mark evasive after 5s
 
-    def __init__(self, ctx, name, peer_identity):
+    def __init__(self, socket, name, peer_identity):
         # TODO: what to do with container?        
-        self._ctx = ctx          # ZMQ context
-        self.mailbox = None      # Socket through to peer
+        self.mailbox = socket    # Socket through to peer
         self.peer_identity = peer_identity # Identity UUID
         self.endpoint = None     # Endpoint connected to
         self.name = name
@@ -38,9 +37,6 @@ class AspyrePeer():
     def connect(self, reply_to, endpoint):
         if self.connected:
             return
-
-        # Create new outgoing socket (drop any messages in transit)
-        self.mailbox = self._ctx.socket(zmq.DEALER)
         
         # Set our caller 'From' identity so that receiving node knows
         # who each message came from.
@@ -57,11 +53,12 @@ class AspyrePeer():
         self.mailbox.setsockopt(zmq.SNDHWM, AspyrePeer.PEER_EXPIRED * 100)
         # Send messages immediately or return EAGAIN
         self.mailbox.setsockopt(zmq.SNDTIMEO, 0)
-
+                
         # Connect through to peer node
         self.logger.debug("Connecting to peer {0} on endpoint {1}".format(self.peer_identity, endpoint))
 
         self.mailbox.connect(endpoint)
+
         self.endpoint = endpoint
         self.connected = True
         self.ready = False
@@ -70,7 +67,7 @@ class AspyrePeer():
     # No more messages will be sent to peer until connected again
     def disconnect(self):
         # If connected, destroy socket and drop all pending messages
-        if (self.connected):
+        if self.connected:
             self.logger.debug("{0} Disconnecting peer {1}".format(self.origin, self.name))
             self.mailbox.disconnect(self.endpoint)
             self.mailbox.close()

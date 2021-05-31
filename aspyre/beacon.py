@@ -183,35 +183,41 @@ class AspyreAsyncBeaconReceiver():
             # it doesn't have the async wrapping
             # we'll need to throw this at asyncio to get a task
             asyncio.create_task(self._process_beacon(frame, addr))
+    
+    # by default we are not expecting a curbe public key
+    def _unpack_beacon(self, frame):
+        return struct.unpack('cccb16sH', frame)
+    
+    async def _update_peer(self, beacon, addr, peer_id, port):
+        _endpoint = "tcp://%s:%d" %(addr[0], port)
+        _peer = await self._peers.require_peer(peer_id, _endpoint)
+        _peer.refresh()
 
     async def _process_beacon(self, frame, addr):
-        beacon = struct.unpack('cccb16sH', frame)
+        _beacon = self._unpack_beacon(frame)
         # Ignore anything that isn't a valid beacon
-        if beacon[3] != BEACON_VERSION:
-            self._logger.warning("Invalid ZRE Beacon version: {0}".format(beacon[3]))
+        if _beacon[3] != BEACON_VERSION:
+            self._logger.warning("Invalid ZRE Beacon version: {0}".format(_beacon[3]))
             return
 
-        peer_id = uuid.UUID(bytes=beacon[4])
-        #print("peerId: %s", peer_id)
-        port = socket.ntohs(beacon[5])
+        _peer_id = uuid.UUID(bytes=_beacon[4])
+        _port = socket.ntohs(_beacon[5])
         # if we receive a beacon with port 0 this means the peer exited
-        if port:
-            endpoint = "tcp://%s:%d" %(addr[0], port)
-            peer = await self._peers.require_peer(peer_id, endpoint)
-            peer.refresh()
+        if _port:
+            await self._update_peer(_beacon, addr, _peer_id, _port)
         else:
             # Zero port means peer is going away; remove it if
             # we had any knowledge of it already
-            peer = self._peers.peers.get(peer_id)
+            peer = self._peers.peers.get(_peer_id)
             # remove the peer (delete)
             if peer:
-                self._logger.debug("Received 0 port beacon, removing peer {0}".format(peer_id))
+                self._logger.debug("Received 0 port beacon, removing peer {0}".format(_peer_id))
                 await self._peers.remove_peer(peer)
 
             else:
                 self._logger.warning(self._peers)
-                self._logger.warning("We don't know peer id {0}".format(peer_id))
-
+                self._logger.warning("We don't know peer id {0}".format(_peer_id))
+    
     def error_received(self, exc):
         """
         string
@@ -224,14 +230,31 @@ class AspyreAsyncBeaconReceiver():
         """
         self._logger.error(f"Connection closed :: {exc}")
 
+class AspyreAsyncBeaconNoEncryptionReceiver(AspyreAsyncBeaconReceiver):
+    def __init__(self, name, transmit, peers):
+        super().__init__(name, transmit, peers)
+
+class AspyreAsyncBeaconEncryptionReceiver(AspyreAsyncBeaconReceiver):
+    def __init__(self, name, transmit, peers):
+        super().__init__(name, transmit, peers)
+    
+    def _unpack_beacon(self, frame):
+        return struct.unpack('cccb16sH32s', frame)
+    
+    async def _update_peer(self, beacon, addr, peer_id, port):
+        endpoint = "tcp://%s:%d" %(addr[0], port)
+        _server_public_key = beacon[6]
+        peer = await self._peers.require_peer(peer_id, endpoint, _server_public_key)
+        peer.refresh()
+
 class AspyreAsyncBeacon():
 
-    def __init__(self, router, peers, **kwargs):
+    def __init__(self, port, peers, **kwargs):
         self.name = kwargs["config"]["general"]["name"]
         self._identity = kwargs["config"]["general"]["identity"]
         self.logger = logging.getLogger("aspyre").getChild(self.name)
 
-        self._router = router
+        self._port = port
 
         self._peers = peers
 
@@ -251,14 +274,25 @@ class AspyreAsyncBeacon():
         self.network_address = None
         self.broadcast_address = None
     
+    def _build_beacon(self):
+        return struct.pack('cccb16sH', b'Z', b'R', b'E',
+                                     BEACON_VERSION, self._identity.bytes,
+                                     socket.htons(self._port))
+
+    def _build_zeroized_beacon(self):
+        return struct.pack('cccb16sH', b'Z', b'R', b'E',
+                                        BEACON_VERSION, self._identity.bytes,
+                                        socket.htons(0))
+    
+    def _build_beacon_receiver(self, transmit):
+        return AspyreAsyncBeaconReceiver(self.name, transmit, self._peers)
+    
     async def run(self, interface):
         self.start(interface)
         try:
-            _transmit = struct.pack('cccb16sH', b'Z', b'R', b'E',
-                                     BEACON_VERSION, self._identity.bytes,
-                                     socket.htons(self._router.port))
+            _transmit = self._build_beacon()
             
-            _beaconReceiver = AspyreAsyncBeaconReceiver(self.name, _transmit, self._peers)
+            _beaconReceiver = self._build_beacon_receiver(_transmit)
             
             # this will receive asynchronously on its own
             _transport, _protocol = await asyncio.get_event_loop().create_datagram_endpoint(
@@ -272,11 +306,10 @@ class AspyreAsyncBeacon():
                 # sleep interval
                 await asyncio.sleep(1.0)
         finally:
+            self.logger.debug("Beacon closing...")
             # we still want to force out one last beacon to inform peers
             # we are leaving
-            _transmit = struct.pack('cccb16sH', b'Z', b'R', b'E',
-                                        BEACON_VERSION, self._identity.bytes,
-                                        socket.htons(0))
+            _transmit = self._build_zeroized_beacon()
             _beaconReceiver.transmit = _transmit
             await self.send_beacon(interface, _transport, _transmit)
             self.udpsock.close()
@@ -370,3 +403,30 @@ class AspyreAsyncBeacon():
         except socket.error:
             self.logger.debug("Network seems gone, exiting zbeacon")
             self._terminated = True
+
+class AspyreAsyncBeaconPlainText(AspyreAsyncBeacon):
+    def __init__(self, port, peers, **kwargs):
+        super().__init__(port, peers, **kwargs)
+
+class AspyreAsyncBeaconEncrypted(AspyreAsyncBeacon):
+    def __init__(self, port, peers, **kwargs):
+        super().__init__(port, peers, **kwargs)
+        self._server_secret_file = kwargs["config"]["authentication"]["server_secret_file"]
+    
+    def _build_beacon(self):
+        _server_public, _ = zmq.auth.load_certificate(self._server_secret_file)
+        return struct.pack('cccb16sH32s', b'Z', b'R', b'E',
+                                     BEACON_VERSION, self._identity.bytes,
+                                     socket.htons(self._port),
+                                     _server_public)
+
+    def _build_zeroized_beacon(self):
+        _server_public, _ = zmq.auth.load_certificate(self._server_secret_file)
+        return struct.pack('cccb16sH32s', b'Z', b'R', b'E',
+                                        BEACON_VERSION, self._identity.bytes,
+                                        socket.htons(0),
+                                        _server_public)
+    
+    def _build_beacon_receiver(self, transmit):
+        return AspyreAsyncBeaconEncryptionReceiver(self.name, transmit, self._peers)
+    

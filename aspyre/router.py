@@ -12,62 +12,18 @@ import logging
 import asyncio
 import json
 
+from zmq.auth.asyncio import AsyncioAuthenticator
+
 from .message import ZreMsg
 
-class AspyreNodeRouterSocket():
-    """
-    The particular details of the router socket are required elsewhere to
-    this class encapsulates that shared information to be used elsewhere.
-
-    These include the port and the endpoint.
-
-    The socket is wrapped by the ::AspyreNodeAsyncRouter below for actually
-    using the router socket to receive.
-    """
-    def __init__(self, interface, **kwargs):
-        self._name = kwargs["config"]["general"]["name"]
-        self._identity = kwargs["config"]["general"]["identity"]
-        self._logger = logging.getLogger("aspyre").getChild(self._name)
-
-        self._ctx = kwargs["config"]["general"]["ctx"]
-
-        self._inbox = self._ctx.socket(zmq.ROUTER)         # Our inbox socket (ROUTER)
-        try:
-            self._inbox.setsockopt(zmq.ROUTER_HANDOVER, 1)
-        except AttributeError as e:
-            self._logger.warning(f"ROUTER_HANDOVER needs zmq version >=4.1 but installed is {zmq.zmq_version()}")
-
-        self._port = self._inbox.bind_to_random_port(f"tcp://{interface.address}")
-        if self._port < 0:
-            # Die on bad interface or port exhaustion
-            raise Exception("Random port assignment for incoming messages failed.")
-        
-        self._endpoint = "tcp://%s:%d" %(interface.address, self._port)
-
-    def __del__(self):
-        pass
-
-    @property
-    def port(self):
-        """Return our port"""
-        return self._port
-
-    @property
-    def endpoint(self):
-        """Return our endpoint"""
-        return self._endpoint
-    
-    async def recv_multipart(self, timeout=0.5):
-        """Exposes the receive function on the underlying socket"""
-        return await asyncio.wait_for(self._inbox.recv_multipart(), timeout=timeout)
-        # TODO: might need to wrap this in catching a cancelled error
-
 class AspyreNodeAsyncRouter():
-    def __init__(self, socket, outbox, peers, peer_groups, **kwargs):
+    def __init__(self, socket, endpoint, outbox, peers, peer_groups, **kwargs):
         self._name = kwargs["config"]["general"]["name"]
         self._logger = logging.getLogger("aspyre").getChild(self._name)
 
         self._socket = socket
+
+        self._endpoint = endpoint
 
         self._outbox = outbox
 
@@ -84,11 +40,13 @@ class AspyreNodeAsyncRouter():
         while not self._terminated:
             self._logger.debug("Receiving...")
             try:
-                frames = await self._socket.recv_multipart()
+                frames = await asyncio.wait_for(self._socket.recv_multipart(), timeout=0.5)
                 if frames is not None:
                     await self._handle_message(frames)
             except asyncio.TimeoutError:
                 continue
+        
+        self._logger.debug("Router closing...")
 
     def start(self):
         """any setup required prior to running"""
@@ -158,7 +116,7 @@ class AspyreNodeAsyncRouter():
                 # remove fake peers
                 if peer.get_ready():
                     await self.remove_peer(peer)
-                elif peer.endpoint == self._socket.endpoint:
+                elif peer.endpoint == self._endpoint:
                     # We ignore HELLO, if peer has same endpoint as current node
                     return
 

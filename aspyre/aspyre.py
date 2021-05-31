@@ -9,10 +9,16 @@ import zmq.asyncio
 from zmq.asyncio import Context
 
 # local modules
-from .database import PeerDatabase, GroupDatabase
+from .database import PeerDatabase, PeerEncryptionDatabase, GroupDatabase
 
-from .beacon import AspyreAsyncBeacon, BeaconInterfaceUtility
-from .router import AspyreNodeRouterSocket, AspyreNodeAsyncRouter
+from .authentication import ClientSocketFactory, ServerSocketFactory
+
+from .authentication import AspyreAuthenticationContext
+from .authentication import AspyreClientNoAuthentication, AspyreServerNoAuthentication
+from .authentication import AspyreClientCurveAuthentication, AspyreServerCurveAuthentication
+
+from .beacon import AspyreAsyncBeacon, AspyreAsyncBeaconEncrypted, BeaconInterfaceUtility
+from .router import AspyreNodeAsyncRouter
 from .reaper import AspyreAsyncReaper
 
 from .node import AspyreAsyncNode
@@ -30,6 +36,11 @@ default_config = {
             "name": None,
             "ctx": None,
             "headers": None
+        },
+        "authentication": {
+            "public_keys_dir": "",
+            "server_secret_file": "",
+            "client_secret_file": ""
         },
         "beacon": {
             "interface_name": "eth0",
@@ -89,6 +100,8 @@ class Aspyre():
         self._node = None
         self._interface = None
 
+        self._authenticator = None
+
         self._inbox = None
         self._outbox = None
 
@@ -130,16 +143,66 @@ class Aspyre():
         self._running_task = asyncio.create_task(self._node.run(self._interface))
 
         return self
+    
+    def _setup_authenticators(self, interface):
+        _server_authenticator = AspyreServerNoAuthentication(
+            self._config["config"]["general"]["ctx"]
+        )
+
+        _client_authenticator = AspyreClientNoAuthentication(
+            self._config["config"]["general"]["ctx"]
+        )
+
+        return _server_authenticator, _client_authenticator
+
+    def _setup_socket_factories(self, interface):
+        _server_authenticator, _client_authenticator = self._setup_authenticators(interface)
+        
+        _server_factory = ServerSocketFactory(
+            _server_authenticator
+        )
+        
+        _client_factory = ClientSocketFactory(
+            _client_authenticator
+        )
+
+        return _server_factory, _client_factory
+    
+    def _setup_peer_database(self, factory, endpoint):
+        # build peer database
+        return PeerDatabase(
+            factory,
+            endpoint,           # seemingly unneccesary
+                                # used in the HELLO message
+                                # used for filtering a scenario that might never happen?
+            self._outbox,       # the channel back to the user
+            self._own_groups,   # the groups this node is joined to
+            self._peer_groups,  # the groups peers are joined to
+            **self._config      # other node configuration details
+        )
+    
+    def _setup_beacon(self, port):
+        return AspyreAsyncBeacon(
+            port,               # the beacon needs to know the router endpoint port for broadcasting
+            self._peers,        # the beacon will add and remove peers based off of the beacons
+                                # it receives
+            **self._config      # other node configuration details
+        )
 
     def start(self, interface):
         """Start node, after setting header values. When you start a node it
         begins discovery and connection. Returns 0 if OK, -1 if it wasn't
         possible to start the node."""
-        # build router socket
-        _router_socket = AspyreNodeRouterSocket(
-            interface,
-            **self._config
-        )
+        _server_factory, _client_factory = self._setup_socket_factories(interface)
+
+        _socket = _server_factory.get_socket(self._config["config"]["general"]["ctx"])
+
+        _port = _socket.bind_to_random_port(f"tcp://{interface.address}")
+        if _port < 0:
+            # Die on bad interface or port exhaustion
+            raise Exception("Random port assignment for incoming messages failed.")
+        
+        _endpoint = "tcp://%s:%d" %(interface.address, _port)
 
         # build node outbox
         self._outbox = self._config["config"]["general"]["ctx"].socket(zmq.PUSH)
@@ -160,27 +223,15 @@ class Aspyre():
         )
 
         # build peer database
-        self._peers = PeerDatabase(
-            _router_socket,     # seemingly unneccesary
-                                # used in the HELLO message
-                                # used for filtering a scenario that might never happen?
-            self._outbox,       # the channel back to the user
-            self._own_groups,   # the groups this node is joined to
-            self._peer_groups,  # the groups peers are joined to
-            **self._config      # other node configuration details
-        )
+        self._peers = self._setup_peer_database(_client_factory, _endpoint)
 
         # build the beacon
-        _beacon = AspyreAsyncBeacon(
-            _router_socket,     # the beacon needs to know the router endpoint port for broadcasting
-            self._peers,        # the beacon will add and remove peers based off of the beacons
-                                # it receives
-            **self._config      # other node configuration details
-        )
+        _beacon = self._setup_beacon(_port)
 
         # build router
         _router = AspyreNodeAsyncRouter(
-            _router_socket,     # take the router socket and wrap it for send/receive
+            _socket,            # take the router socket and wrap it for send/receive
+            _endpoint,
             self._outbox,       # the channel back to the user 
             self._peers,        # the HELLO could come in before the beacon
                                 # will create peers in this case
@@ -297,3 +348,57 @@ class Aspyre():
     def peer_groups(self):
         """Return list of groups known through connected peers."""
         return list(self.peer_groups.groups.keys())
+
+class AspyrePlainText(Aspyre):
+    """
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+class AspyreEncrypted(Aspyre):
+    """
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def _setup_authenticators(self, interface):
+        """
+        """
+        _authentication_context = AspyreAuthenticationContext(
+            self._config["config"]["general"]["ctx"],
+            interface,
+            self._config["config"]["authentication"]["public_keys_dir"]
+        )
+
+        _server_authenticator = AspyreServerCurveAuthentication(
+            self._config["config"]["general"]["ctx"],
+            self._config["config"]["authentication"]["server_secret_file"]
+        )
+
+        _client_authenticator = AspyreClientCurveAuthentication(
+            self._config["config"]["general"]["ctx"],
+            self._config["config"]["authentication"]["client_secret_file"]
+        )
+
+        return _server_authenticator, _client_authenticator
+
+    def _setup_peer_database(self, factory, endpoint):
+        # build peer database
+        return PeerEncryptionDatabase(
+            factory,
+            endpoint,           # seemingly unneccesary
+                                # used in the HELLO message
+                                # used for filtering a scenario that might never happen?
+            self._outbox,       # the channel back to the user
+            self._own_groups,   # the groups this node is joined to
+            self._peer_groups,  # the groups peers are joined to
+            **self._config      # other node configuration details
+        )
+    
+    def _setup_beacon(self, port):
+        return AspyreAsyncBeaconEncrypted(
+            port,               # the beacon needs to know the router endpoint port for broadcasting
+            self._peers,        # the beacon will add and remove peers based off of the beacons
+                                # it receives
+            **self._config      # other node configuration details
+        )

@@ -27,6 +27,8 @@ class AspyreAsyncReaper():
                 await self.ping_peer(peer_id)
             # sleep interval
             await asyncio.sleep(self._interval)
+        
+        self._logger.debug("Reaper closing...")
 
     def start(self, interface):
         pass
