@@ -239,7 +239,7 @@ class AspyreAsyncBeaconEncryptionReceiver(AspyreAsyncBeaconReceiver):
         super().__init__(name, transmit, peers)
     
     def _unpack_beacon(self, frame):
-        return struct.unpack('cccb16sH32s', frame)
+        return struct.unpack('cccb16sH40s', frame)
     
     async def _update_peer(self, beacon, addr, peer_id, port):
         endpoint = "tcp://%s:%d" %(addr[0], port)
@@ -415,14 +415,14 @@ class AspyreAsyncBeaconEncrypted(AspyreAsyncBeacon):
     
     def _build_beacon(self):
         _server_public, _ = zmq.auth.load_certificate(self._server_secret_file)
-        return struct.pack('cccb16sH32s', b'Z', b'R', b'E',
+        return struct.pack('cccb16sH40s', b'Z', b'R', b'E',
                                      BEACON_VERSION, self._identity.bytes,
                                      socket.htons(self._port),
                                      _server_public)
 
     def _build_zeroized_beacon(self):
         _server_public, _ = zmq.auth.load_certificate(self._server_secret_file)
-        return struct.pack('cccb16sH32s', b'Z', b'R', b'E',
+        return struct.pack('cccb16sH40s', b'Z', b'R', b'E',
                                         BEACON_VERSION, self._identity.bytes,
                                         socket.htons(0),
                                         _server_public)

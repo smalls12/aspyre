@@ -44,12 +44,6 @@ class PeerDatabase():
             peer.disconnect()
             self._logger.debug("Purge peer: {0}{1}".format(peer, endpoint))
     
-    def _create_new_peer_connection(self, key=None):
-        return self._factory.get_socket(
-            self._ctx,
-            key
-        )
-    
     async def _send_hello_to_new_peer(self, peer):
         # Handshake discovery by sending HELLO as first message
         _zmsg = ZreMsg(ZreMsg.HELLO)
@@ -61,9 +55,9 @@ class PeerDatabase():
         await peer.send(_zmsg)
     
     # Find or create peer via its UUID string
-    async def require_peer(self, peer_identity, endpoint, key=None):
+    async def initialize_peer(self, peer_identity, endpoint):
         """
-        string
+        build the peer, if not already built
         """
         _peer = self._peers.get(peer_identity)
         if not _peer:
@@ -71,15 +65,24 @@ class PeerDatabase():
             for _, __peer in self._peers.copy().items():
                 await self._purge_peer(__peer, endpoint)
             
-            _socket = self._create_new_peer_connection(key)
-
-            _peer = AspyrePeer(_socket, self._name, peer_identity)
+            _peer = AspyrePeer(self._factory, self._outbox, self._name, peer_identity)
             self._peers[peer_identity] = _peer
+
+        return _peer
+    
+    # Find or create peer via its UUID string
+    async def require_peer(self, peer_identity, endpoint, key):
+        """
+        build the peer, if not already built
+        connect, it not already connected
+        """
+        _peer = await self.initialize_peer(peer_identity, endpoint)
+        if not _peer.connected:
             _peer.set_origin(self._name)
-            _peer.connect(self._identity, endpoint)
+            _peer.connect(self._identity, endpoint, key)
 
             await self._send_hello_to_new_peer(_peer)
-
+        
         return _peer
     
     #  Remove a peer from our data structures

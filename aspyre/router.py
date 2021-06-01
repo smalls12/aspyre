@@ -19,6 +19,7 @@ from .message import ZreMsg
 class AspyreNodeAsyncRouter():
     def __init__(self, socket, endpoint, outbox, peers, peer_groups, **kwargs):
         self._name = kwargs["config"]["general"]["name"]
+        self._identity = kwargs["config"]["general"]["identity"]
         self._logger = logging.getLogger("aspyre").getChild(self._name)
 
         self._socket = socket
@@ -115,13 +116,13 @@ class AspyreNodeAsyncRouter():
             if peer:
                 # remove fake peers
                 if peer.get_ready():
-                    await self.remove_peer(peer)
+                    await self._peers.remove_peer(peer)
                 elif peer.endpoint == self._endpoint:
                     # We ignore HELLO, if peer has same endpoint as current node
                     return
 
             # so we got a HELLO from a peer we don't know, maybe the beacon was late
-            peer = await self._peers.require_peer(address, _zmsg.get_endpoint())
+            peer = await self._peers.initialize_peer(address, _zmsg.get_endpoint())
             peer.set_ready(True)
 
         # Ignore command if peer isn't ready
@@ -131,7 +132,7 @@ class AspyreNodeAsyncRouter():
 
         if peer.messages_lost(_zmsg):
             self._logger.warning(f"{self._identity} messages lost from {peer.identity}")
-            await self.remove_peer(peer)
+            await self._peers.remove_peer(peer)
             return
 
         # Now process each command

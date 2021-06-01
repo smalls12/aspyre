@@ -13,8 +13,15 @@ async def receiver(node, message):
     print(message)
 
 async def main():
-    # this will automatically start the pyre engine
-    async with aspyre.Aspyre() as node:               
+    authentication = {
+        "public_keys_dir": "~/path_to_public_keys",
+        "server_secret_file": "~/path_to_server_secret_file",
+        "client_secret_file": "~/path_to_client_secret_file"
+    }
+
+
+    # this will automatically start the aspyre engine
+    async with aspyre.AspyreEncrypted(authentication) as node:
         await node.join("CHAT")
         try:
             try:

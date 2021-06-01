@@ -99,36 +99,37 @@ class AspyreClientCurveAuthentication(AspyreCurveAuthentication):
 class SocketFactory():
     """
     """
-    def __init__(self, authenticator):
+    def __init__(self, context, authenticator):
+        self._context = context
         self._authenticator = authenticator
 
-    def get_socket(self, context, type):
+    def get_socket(self, type):
         """
         """
-        return context.socket(type)
+        return self._context.socket(type)
 
 class ServerSocketFactory(SocketFactory):
     """
     """
-    def __init__(self, authenticator):
-        super().__init__(authenticator)
+    def __init__(self, context, authenticator):
+        super().__init__(context, authenticator)
 
-    def get_socket(self, context):
+    def get_socket(self):
         """
         """
-        _socket = super().get_socket(context, zmq.ROUTER)
+        _socket = super().get_socket(zmq.ROUTER)
         self._authenticator.authenticate(_socket)
         return _socket
 
 class ClientSocketFactory(SocketFactory):
     """
     """
-    def __init__(self, authenticator):
-        super().__init__(authenticator)
+    def __init__(self, context, authenticator):
+        super().__init__(context, authenticator)
 
-    def get_socket(self, context, server_public_key):
+    def get_socket(self, server_public_key):
         """
         """
-        _socket = super().get_socket(context, zmq.DEALER)
+        _socket = super().get_socket(zmq.DEALER)
         self._authenticator.authenticate(_socket, server_public_key)
         return _socket

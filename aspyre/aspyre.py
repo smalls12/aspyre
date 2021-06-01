@@ -37,11 +37,7 @@ default_config = {
             "ctx": None,
             "headers": None
         },
-        "authentication": {
-            "public_keys_dir": "",
-            "server_secret_file": "",
-            "client_secret_file": ""
-        },
+        "authentication": None,
         "beacon": {
             "interface_name": "eth0",
             "port": ZRE_DISCOVERY_PORT,
@@ -53,23 +49,17 @@ default_config = {
         "router": {
 
         }
-    }
-    
+    }  
 }
 
-class Aspyre():
+class AspyreImpl():
     """
     responsible for constructing the various components of an aspyre
     instance.
     """
     def __init__(self, **kwargs):
-        """Constructor, creates a new Zyre node. Note that until you start the
-        node it is silent and invisible to other nodes on the network.
-        The node name is provided to other nodes during discovery. If you
-        specify NULL, Zyre generates a randomized node name from the UUID.
-
-        Args:
-            name (str): The name of the node
+        """
+        Constructor
 
         Kwargs:
             ctx: PyZMQ Context, if not specified a new context will be created
@@ -115,24 +105,37 @@ class Aspyre():
         self._running_task = None
 
     async def __aenter__(self):
+        """
+        asynchronous context manager entry
+        """
         return await self.run()
 
     async def __aexit__(self, type, value, traceback):
+        """
+        asynchronous context manager exit
+        """
         await self.stop()
 
     def __del__(self):
         self._inbox.close()
 
     def uuid(self):
-        """Return our node UUID string, after successful initialization"""
+        """
+        Return our node UUID string
+        """
         return self._identity
 
     @property
     def name(self):
-        """Return our node name, after successful initialization"""
+        """
+        Return our node name
+        """
         return self._name
     
     async def run(self):
+        """
+        responsible for starting the asynchronous engine
+        """
         # check for interface
         _beaconInterfaceUtility = BeaconInterfaceUtility(**self._config)
         self._interface = _beaconInterfaceUtility.find_interface(self._config["config"]["beacon"]["interface_name"])
@@ -145,6 +148,11 @@ class Aspyre():
         return self
     
     def _setup_authenticators(self, interface):
+        """
+        ( will be overloaded )
+        sets up the default authentication for aspyre
+        ( no authentication )
+        """
         _server_authenticator = AspyreServerNoAuthentication(
             self._config["config"]["general"]["ctx"]
         )
@@ -154,35 +162,10 @@ class Aspyre():
         )
 
         return _server_authenticator, _client_authenticator
-
-    def _setup_socket_factories(self, interface):
-        _server_authenticator, _client_authenticator = self._setup_authenticators(interface)
-        
-        _server_factory = ServerSocketFactory(
-            _server_authenticator
-        )
-        
-        _client_factory = ClientSocketFactory(
-            _client_authenticator
-        )
-
-        return _server_factory, _client_factory
-    
-    def _setup_peer_database(self, factory, endpoint):
-        # build peer database
-        return PeerDatabase(
-            factory,
-            endpoint,           # seemingly unneccesary
-                                # used in the HELLO message
-                                # used for filtering a scenario that might never happen?
-            self._outbox,       # the channel back to the user
-            self._own_groups,   # the groups this node is joined to
-            self._peer_groups,  # the groups peers are joined to
-            **self._config      # other node configuration details
-        )
     
     def _setup_beacon(self, port):
         return AspyreAsyncBeacon(
+            self._outbox,
             port,               # the beacon needs to know the router endpoint port for broadcasting
             self._peers,        # the beacon will add and remove peers based off of the beacons
                                 # it receives
@@ -193,9 +176,19 @@ class Aspyre():
         """Start node, after setting header values. When you start a node it
         begins discovery and connection. Returns 0 if OK, -1 if it wasn't
         possible to start the node."""
-        _server_factory, _client_factory = self._setup_socket_factories(interface)
+        _server_authenticator, _client_authenticator = self._setup_authenticators(interface)
+        
+        _server_factory = ServerSocketFactory(
+            self._config["config"]["general"]["ctx"],
+            _server_authenticator
+        )
+        
+        _client_factory = ClientSocketFactory(
+            self._config["config"]["general"]["ctx"],
+            _client_authenticator
+        )
 
-        _socket = _server_factory.get_socket(self._config["config"]["general"]["ctx"])
+        _socket = _server_factory.get_socket()
 
         _port = _socket.bind_to_random_port(f"tcp://{interface.address}")
         if _port < 0:
@@ -223,7 +216,16 @@ class Aspyre():
         )
 
         # build peer database
-        self._peers = self._setup_peer_database(_client_factory, _endpoint)
+        self._peers = PeerDatabase(
+            _client_factory,
+            _endpoint,          # seemingly unneccesary
+                                # used in the HELLO message
+                                # used for filtering a scenario that might never happen?
+            self._outbox,       # the channel back to the user
+            self._own_groups,   # the groups this node is joined to
+            self._peer_groups,  # the groups peers are joined to
+            **self._config      # other node configuration details
+        )
 
         # build the beacon
         _beacon = self._setup_beacon(_port)
@@ -349,17 +351,18 @@ class Aspyre():
         """Return list of groups known through connected peers."""
         return list(self.peer_groups.groups.keys())
 
-class AspyrePlainText(Aspyre):
+class Aspyre(AspyreImpl):
     """
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-class AspyreEncrypted(Aspyre):
+class AspyreEncrypted(AspyreImpl):
     """
     """
-    def __init__(self, **kwargs):
+    def __init__(self, authentication, **kwargs):
         super().__init__(**kwargs)
+        self._config["config"]["authentication"] = authentication
 
     def _setup_authenticators(self, interface):
         """
@@ -381,20 +384,7 @@ class AspyreEncrypted(Aspyre):
         )
 
         return _server_authenticator, _client_authenticator
-
-    def _setup_peer_database(self, factory, endpoint):
-        # build peer database
-        return PeerEncryptionDatabase(
-            factory,
-            endpoint,           # seemingly unneccesary
-                                # used in the HELLO message
-                                # used for filtering a scenario that might never happen?
-            self._outbox,       # the channel back to the user
-            self._own_groups,   # the groups this node is joined to
-            self._peer_groups,  # the groups peers are joined to
-            **self._config      # other node configuration details
-        )
-    
+   
     def _setup_beacon(self, port):
         return AspyreAsyncBeaconEncrypted(
             port,               # the beacon needs to know the router endpoint port for broadcasting

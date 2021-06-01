@@ -11,10 +11,12 @@ class AspyrePeer():
     PEER_EXPIRED = 30              # expire after 10s
     PEER_EVASIVE = 10              # mark evasive after 5s
 
-    def __init__(self, socket, name, peer_identity):
+    def __init__(self, factory, outbox, name, identity):
         # TODO: what to do with container?        
-        self.mailbox = socket    # Socket through to peer
-        self.peer_identity = peer_identity # Identity UUID
+        self._factory = factory
+        self._outbox = outbox
+        self.mailbox = None    # Socket through to peer
+        self.identity = identity # Identity UUID
         self.endpoint = None     # Endpoint connected to
         self.name = name
         self.logger = logging.getLogger("aspyre").getChild(self.name)
@@ -34,9 +36,13 @@ class AspyrePeer():
         self.disconnect()
 
     # Connect peer mailbox
-    def connect(self, reply_to, endpoint):
+    def connect(self, reply_to, endpoint, key=None):
         if self.connected:
             return
+        
+        self.mailbox = self._factory.get_socket(
+            key
+        )
         
         # Set our caller 'From' identity so that receiving node knows
         # who each message came from.
@@ -55,7 +61,7 @@ class AspyrePeer():
         self.mailbox.setsockopt(zmq.SNDTIMEO, 0)
                 
         # Connect through to peer node
-        self.logger.debug("Connecting to peer {0} on endpoint {1}".format(self.peer_identity, endpoint))
+        self.logger.debug("Connecting to peer {0} on endpoint {1}".format(self.identity, endpoint))
 
         self.mailbox.connect(endpoint)
 
@@ -116,7 +122,7 @@ class AspyrePeer():
                 msg.get_sequence()))
 
         else:
-            self.logger.debug("Peer {0} is not connected".format(self.peer_identity))
+            self.logger.debug("Peer {0} is not connected".format(self.identity))
     # end send
 
     # Return peer connected status
@@ -126,7 +132,7 @@ class AspyrePeer():
 
     # Return peer identity string
     def get_identity(self):
-        return self.peer_identity
+        return self.identity
     # end get_identity
 
     # Return peer connection endpoint

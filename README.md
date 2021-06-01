@@ -47,7 +47,7 @@ async def receiver(node, message):
 async def main():
     # this will automatically start the pyre engine
     async with aspyre.Aspyre() as node:               
-        await node.join("blah")
+        await node.join("CHAT")
         try:
             try:
                 # run aspyre for 10 seconds
@@ -55,8 +55,39 @@ async def main():
             except asyncio.TimeoutError:
                 pass
         finally:
-            # await work_task
-            await node.leave("blah")
+            await node.leave("CHAT")
+
+if __name__ == '__main__':
+    asyncio.run(main())
+```
+
+## encrypted example
+
+```python
+import asyncio
+import aspyre
+
+async def receiver(node, message):
+    print(message)
+
+async def main():
+    authentication = {
+        "public_keys_dir": "~/path_to_public_keys",
+        "server_secret_file": "~/path_to_server_secret_file",
+        "client_secret_file": "~/path_to_client_secret_file"
+    }
+
+    # this will automatically start the pyre engine
+    async with aspyre.AspyreEncrypted(authentication) as node:               
+        await node.join("CHAT")
+        try:
+            try:
+                # run aspyre for 10 seconds
+                await asyncio.wait_for(node.listen(receiver), timeout=10)
+            except asyncio.TimeoutError:
+                pass
+        finally:
+            await node.leave("CHAT")
 
 if __name__ == '__main__':
     asyncio.run(main())
