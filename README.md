@@ -13,8 +13,17 @@ Check the wiki.
 
 ## goals
 
-1. Reimplement pyre so that internally it uses asyncio
-2. Implement https://rfc.zeromq.org/spec/43/
+1. Reimplement pyre so that internally it uses asyncio [ DONE ]
+2. Implement https://rfc.zeromq.org/spec/43/ [ WIP ]<br>
+    a. Implement CURVE Encryption [ DONE ]<br>
+    b. Implement IPv6 Beacons<br>
+
+## status
+
+example code has been checked in showing how some simple aspyre nodes can be
+created using no encryption ( default ) or with encryption.
+
+i'm currently just working on cleaning up the code.
 
 ## rationale
 
@@ -45,7 +54,7 @@ async def receiver(node, message):
     print(message)
 
 async def main():
-    # this will automatically start the pyre engine
+    # this will automatically start the aspyre engine
     async with aspyre.Aspyre() as node:               
         await node.join("CHAT")
         try:
@@ -77,7 +86,7 @@ async def main():
         "client_secret_file": "~/path_to_client_secret_file"
     }
 
-    # this will automatically start the pyre engine
+    # this will automatically start the aspyre engine
     async with aspyre.AspyreEncrypted(authentication) as node:               
         await node.join("CHAT")
         try:
