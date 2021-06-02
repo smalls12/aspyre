@@ -6,7 +6,7 @@ import asyncio
 import zmq.asyncio
 from zmq.asyncio import Context
 
-class AspyrePeer():
+class AspyrePeerImpl():
 
     PEER_EXPIRED = 30              # expire after 10s
     PEER_EVASIVE = 10              # mark evasive after 5s
@@ -34,16 +34,8 @@ class AspyrePeer():
 
     def __del__(self):
         self.disconnect()
-
-    # Connect peer mailbox
-    def connect(self, reply_to, endpoint, key=None):
-        if self.connected:
-            return
         
-        self.mailbox = self._factory.get_socket(
-            key
-        )
-        
+    def _connect_internal(self, reply_to, endpoint):
         # Set our caller 'From' identity so that receiving node knows
         # who each message came from.
         # Set our own identity on the socket so that receiving node
@@ -59,8 +51,7 @@ class AspyrePeer():
         self.mailbox.setsockopt(zmq.SNDHWM, AspyrePeer.PEER_EXPIRED * 100)
         # Send messages immediately or return EAGAIN
         self.mailbox.setsockopt(zmq.SNDTIMEO, 0)
-                
-        # Connect through to peer node
+
         self.logger.debug("Connecting to peer {0} on endpoint {1}".format(self.identity, endpoint))
 
         self.mailbox.connect(endpoint)
@@ -68,6 +59,17 @@ class AspyrePeer():
         self.endpoint = endpoint
         self.connected = True
         self.ready = False
+
+    def _get_socket(self):
+        return self._factory.get_socket()
+
+    # Connect peer mailbox
+    def connect(self, reply_to, endpoint):
+        if self.connected:
+            return
+        
+        self.mailbox = self._get_socket()
+        self._connect_internal(reply_to, endpoint)
 
     # Disconnect peer mailbox
     # No more messages will be sent to peer until connected again
@@ -229,3 +231,28 @@ class AspyrePeer():
             return True
         return False
     # end check_message
+
+class AspyrePeer(AspyrePeerImpl):
+    """
+    """
+    def __init__(self, factory, outbox, name, identity):
+        super().__init__(factory, outbox, name, identity)
+
+class AspyrePeerEncrypted(AspyrePeerImpl):
+    """
+    """
+    def __init__(self, factory, outbox, name, identity):
+        super().__init__(factory, outbox, name, identity)
+
+    def _get_socket(self, key):
+        return self._factory.get_socket(
+            key
+        )
+
+    # Connect peer mailbox
+    def connect(self, reply_to, endpoint, key):
+        if self.connected:
+            return
+        
+        self.mailbox = self._get_socket(key)
+        self._connect_internal(reply_to, endpoint)

@@ -9,27 +9,27 @@ import zmq.asyncio
 from zmq.asyncio import Context
 
 # local modules
-from .database import PeerDatabase, PeerEncryptionDatabase, GroupDatabase
-
-from .authentication import ClientSocketFactory, ServerSocketFactory
+from .database import PeerDatabase, PeerDatabaseEncrypted, GroupDatabase
 
 from .authentication import AspyreAuthenticationContext
 from .authentication import AspyreClientNoAuthentication, AspyreServerNoAuthentication
 from .authentication import AspyreClientCurveAuthentication, AspyreServerCurveAuthentication
+
+from .factory import ClientSocketFactory, ServerSocketFactory
+from .factory import EncryptedClientSocketFactory, EncryptedServerSocketFactory
 
 from .beacon import AspyreAsyncBeacon, AspyreAsyncBeaconEncrypted, BeaconInterfaceUtility
 from .router import AspyreNodeAsyncRouter
 from .reaper import AspyreAsyncReaper
 
 from .node import AspyreAsyncNode
-from .pyre_event import PyreEvent
 
 ZRE_DISCOVERY_PORT = 5670
 BEACON_TRANSMIT_INTERVAL = 1.0
 
 REAPING_INTERVAL = 1.0
 
-default_config = {
+DEFAULT_CONFIG = {
     "config": {
         "general": {
             "identity": None,
@@ -49,7 +49,7 @@ default_config = {
         "router": {
 
         }
-    }  
+    }
 }
 
 class AspyreImpl():
@@ -64,29 +64,29 @@ class AspyreImpl():
         Kwargs:
             ctx: PyZMQ Context, if not specified a new context will be created
         """
-        self._config = default_config
+        self._config = DEFAULT_CONFIG
         try:
             for _name, _data in kwargs["config"]["general"].items():
                 self._config["config"]["general"][_name] = _data
         except KeyError:
             pass
-        
+
         try:
             for _name, _data in kwargs["config"]["beacon"].items():
                 self._config["config"]["beacon"][_name] = _data
         except KeyError:
             pass
-          
+
         self._config["config"]["general"]["identity"] = uuid.uuid4()
 
         if self._config["config"]["general"]["name"] is None:
             self._config["config"]["general"]["name"] = str(self._config["config"]["general"]["identity"])[:6]
-            
+
         self._logger = logging.getLogger("aspyre").getChild(self._config["config"]["general"]["name"])
 
         if self._config["config"]["general"]["ctx"] is None:
             self._config["config"]["general"]["ctx"] = Context.instance()
-        
+
         self._node = None
         self._interface = None
 
@@ -131,7 +131,7 @@ class AspyreImpl():
         Return our node name
         """
         return self._name
-    
+
     async def run(self):
         """
         responsible for starting the asynchronous engine
@@ -140,62 +140,59 @@ class AspyreImpl():
         _beaconInterfaceUtility = BeaconInterfaceUtility(**self._config)
         self._interface = _beaconInterfaceUtility.find_interface(self._config["config"]["beacon"]["interface_name"])
 
-        self.start(self._interface)
+        self.start()
 
         self._running = True
         self._running_task = asyncio.create_task(self._node.run(self._interface))
 
         return self
-    
-    def _setup_authenticators(self, interface):
-        """
-        ( will be overloaded )
-        sets up the default authentication for aspyre
-        ( no authentication )
-        """
-        _server_authenticator = AspyreServerNoAuthentication(
+
+    def _setup_socket_factories(self):
+        _server_factory = ServerSocketFactory(
             self._config["config"]["general"]["ctx"]
         )
 
-        _client_authenticator = AspyreClientNoAuthentication(
+        _client_factory = ClientSocketFactory(
             self._config["config"]["general"]["ctx"]
         )
 
-        return _server_authenticator, _client_authenticator
+        return _server_factory, _client_factory
     
+    def _setup_peer_database(self, factory, endpoint):
+        # build peer database
+        return PeerDatabase(
+            factory,
+            endpoint,           # seemingly unneccesary
+                                # used in the HELLO message
+                                # used for filtering a scenario that might never happen?
+            self._outbox,       # the channel back to the user
+            self._own_groups,   # the groups this node is joined to
+            self._peer_groups,  # the groups peers are joined to
+            **self._config      # other node configuration details
+        )
+
     def _setup_beacon(self, port):
         return AspyreAsyncBeacon(
-            self._outbox,
             port,               # the beacon needs to know the router endpoint port for broadcasting
             self._peers,        # the beacon will add and remove peers based off of the beacons
                                 # it receives
             **self._config      # other node configuration details
         )
 
-    def start(self, interface):
+    def start(self):
         """Start node, after setting header values. When you start a node it
         begins discovery and connection. Returns 0 if OK, -1 if it wasn't
         possible to start the node."""
-        _server_authenticator, _client_authenticator = self._setup_authenticators(interface)
-        
-        _server_factory = ServerSocketFactory(
-            self._config["config"]["general"]["ctx"],
-            _server_authenticator
-        )
-        
-        _client_factory = ClientSocketFactory(
-            self._config["config"]["general"]["ctx"],
-            _client_authenticator
-        )
+        _server_factory, _client_factory = self._setup_socket_factories()
 
         _socket = _server_factory.get_socket()
 
-        _port = _socket.bind_to_random_port(f"tcp://{interface.address}")
+        _port = _socket.bind_to_random_port(f"tcp://{self._interface.address}")
         if _port < 0:
             # Die on bad interface or port exhaustion
             raise Exception("Random port assignment for incoming messages failed.")
-        
-        _endpoint = "tcp://%s:%d" %(interface.address, _port)
+
+        _endpoint = "tcp://%s:%d" %(self._interface.address, _port)
 
         # build node outbox
         self._outbox = self._config["config"]["general"]["ctx"].socket(zmq.PUSH)
@@ -216,15 +213,9 @@ class AspyreImpl():
         )
 
         # build peer database
-        self._peers = PeerDatabase(
+        self._peers = self._setup_peer_database(
             _client_factory,
-            _endpoint,          # seemingly unneccesary
-                                # used in the HELLO message
-                                # used for filtering a scenario that might never happen?
-            self._outbox,       # the channel back to the user
-            self._own_groups,   # the groups this node is joined to
-            self._peer_groups,  # the groups peers are joined to
-            **self._config      # other node configuration details
+            _endpoint
         )
 
         # build the beacon
@@ -234,7 +225,7 @@ class AspyreImpl():
         _router = AspyreNodeAsyncRouter(
             _socket,            # take the router socket and wrap it for send/receive
             _endpoint,
-            self._outbox,       # the channel back to the user 
+            self._outbox,       # the channel back to the user
             self._peers,        # the HELLO could come in before the beacon
                                 # will create peers in this case
             self._peer_groups,
@@ -269,25 +260,25 @@ class AspyreImpl():
             await self._running_task
             self._inbox.disconnect("inproc://events-{}".format(self._config["config"]["general"]["identity"]))
 
-    '''
-    this will block the caller
-    but won't block the asynchronous context
-
-    keep receiving messages until the engine stops or
-    specifically requested to stop vie ::stop_listening
-    '''
     async def listen(self, receiver):
+        """
+        this will block the caller
+        but won't block the asynchronous context
+
+        keep receiving messages until the engine stops or
+        specifically requested to stop vie ::stop_listening
+        """
         self._listening = True
         while self._listening:
             try:
                 await receiver(self, await self.recv())
             except asyncio.TimeoutError:
                 pass
-
-    '''
-    this will cause any current ::listen calls to end
-    '''
+    
     def stop_listening(self):
+        """
+        this will cause any current ::listen calls to end
+        """
         self._listening = False
 
     # Receive next message from node
@@ -353,23 +344,23 @@ class AspyreImpl():
 
 class Aspyre(AspyreImpl):
     """
+    just an alias for the base implementation
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
 class AspyreEncrypted(AspyreImpl):
     """
+    overload the base implementation for encryption
     """
     def __init__(self, authentication, **kwargs):
         super().__init__(**kwargs)
         self._config["config"]["authentication"] = authentication
-
-    def _setup_authenticators(self, interface):
-        """
-        """
+    
+    def _setup_socket_factories(self):
         _authentication_context = AspyreAuthenticationContext(
             self._config["config"]["general"]["ctx"],
-            interface,
+            self._interface,
             self._config["config"]["authentication"]["public_keys_dir"]
         )
 
@@ -383,9 +374,36 @@ class AspyreEncrypted(AspyreImpl):
             self._config["config"]["authentication"]["client_secret_file"]
         )
 
-        return _server_authenticator, _client_authenticator
-   
+        _server_factory = EncryptedServerSocketFactory(
+            self._config["config"]["general"]["ctx"],
+            _server_authenticator
+        )
+
+        _client_factory = EncryptedClientSocketFactory(
+            self._config["config"]["general"]["ctx"],
+            _client_authenticator
+        )
+
+        return _server_factory, _client_factory
+    
+    def _setup_peer_database(self, factory, endpoint):
+        # build peer database
+        return PeerDatabaseEncrypted(
+            factory,
+            endpoint,           # seemingly unneccesary
+                                # used in the HELLO message
+                                # used for filtering a scenario that might never happen?
+            self._outbox,       # the channel back to the user
+            self._own_groups,   # the groups this node is joined to
+            self._peer_groups,  # the groups peers are joined to
+            **self._config      # other node configuration details
+        )
+
     def _setup_beacon(self, port):
+        """
+        overload the beacon setup for retrieving the server
+        public key from the beacon data
+        """
         return AspyreAsyncBeaconEncrypted(
             port,               # the beacon needs to know the router endpoint port for broadcasting
             self._peers,        # the beacon will add and remove peers based off of the beacons

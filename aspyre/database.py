@@ -1,10 +1,10 @@
 import logging
 
 from .message import ZreMsg
-from .peer import AspyrePeer
+from .peer import AspyrePeer, AspyrePeerEncrypted
 from .group import PyreGroup
 
-class PeerDatabase():
+class PeerDatabaseImpl():
     def __init__(self, factory, endpoint, outbox, own_groups, peer_groups, **kwargs):
         self._name = kwargs["config"]["general"]["name"]
         self._identity = kwargs["config"]["general"]["identity"]
@@ -71,7 +71,7 @@ class PeerDatabase():
         return _peer
     
     # Find or create peer via its UUID string
-    async def require_peer(self, peer_identity, endpoint, key):
+    async def require_peer(self, peer_identity, endpoint):
         """
         build the peer, if not already built
         connect, it not already connected
@@ -79,7 +79,7 @@ class PeerDatabase():
         _peer = await self.initialize_peer(peer_identity, endpoint)
         if not _peer.connected:
             _peer.set_origin(self._name)
-            _peer.connect(self._identity, endpoint, key)
+            _peer.connect(self._identity, endpoint)
 
             await self._send_hello_to_new_peer(_peer)
         
@@ -106,19 +106,48 @@ class PeerDatabase():
         # To destroy peer, we remove from peers hash table (dict)
         self._peers.pop(peer.get_identity())
 
-class PeerNoEncryptionDatabase(PeerDatabase):
+class PeerDatabase(PeerDatabaseImpl):
+    """
+    """
     def __init__(self, factory, endpoint, outbox, own_groups, peer_groups, **kwargs):
         super().__init__(factory, endpoint, outbox, own_groups, peer_groups, **kwargs)
 
-class PeerEncryptionDatabase(PeerDatabase):
+class PeerDatabaseEncrypted(PeerDatabaseImpl):
+    """
+    """
     def __init__(self, factory, endpoint, outbox, own_groups, peer_groups, **kwargs):
         super().__init__(factory, endpoint, outbox, own_groups, peer_groups, **kwargs)
+    
+    # Find or create peer via its UUID string
+    async def initialize_peer(self, peer_identity, endpoint):
+        """
+        build the peer, if not already built
+        """
+        _peer = self._peers.get(peer_identity)
+        if not _peer:
+            # Purge any previous peer on same endpoint
+            for _, __peer in self._peers.copy().items():
+                await self._purge_peer(__peer, endpoint)
+            
+            _peer = AspyrePeerEncrypted(self._factory, self._outbox, self._name, peer_identity)
+            self._peers[peer_identity] = _peer
 
-    def _create_new_peer_connection(self, key=None):
-        return self._factory.get_socket(
-            self._ctx,
-            key
-        )
+        return _peer
+
+    # Find or create peer via its UUID string
+    async def require_peer(self, peer_identity, endpoint, key):
+        """
+        build the peer, if not already built
+        connect, it not already connected
+        """
+        _peer = await self.initialize_peer(peer_identity, endpoint)
+        if not _peer.connected:
+            _peer.set_origin(self._name)
+            _peer.connect(self._identity, endpoint, key)
+
+            await self._send_hello_to_new_peer(_peer)
+        
+        return _peer
 
 class GroupDatabase():
     def __init__(self, **kwargs):

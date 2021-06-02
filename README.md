@@ -17,6 +17,7 @@ Check the wiki.
 2. Implement https://rfc.zeromq.org/spec/43/ [ WIP ]<br>
     a. Implement CURVE Encryption [ DONE ]<br>
     b. Implement IPv6 Beacons<br>
+3. Implement zyre ( https://github.com/zeromq/zyre ) elections
 
 ## status
 
