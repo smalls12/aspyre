@@ -17,26 +17,23 @@
     IPv4 UDP broadcasts. You can define the format of your outgoing beacons,
     and set a filter that validates incoming beacons. Beacons are sent and
     received asynchronously in the background.
-
-    This class replaces zbeacon_v2, and is meant for applications that use
-    the CZMQ v3 API (meaning, zsock).
 """
 
 import logging
 import ipaddress
 import socket
-import zmq
+
 import struct
 import time
 from sys import platform
 import uuid
+import asyncio
+
 from . import zhelper
 from .zhelper import u
 
-import asyncio
 
-import zmq.asyncio
-from zmq.asyncio import Context
+import zmq
 
 BEACON_VERSION = 1
 
@@ -46,21 +43,39 @@ ENETDOWN = 50   #socket error, network is down
 ENETUNREACH = 51 #socket error, network unreachable
 
 class BeaconInterface():
+    """
+    string
+    """
     def __init__(self, address, network_address, broadcast_address, interface_name):
+        """
+        string
+        """
         self.address = address
         self.network_address = network_address
         self.broadcast_address = broadcast_address
         self.interface_name = interface_name
 
 class BeaconInterfaceUtility():
+    """
+    string
+    """
     def __init__(self, **kwargs):
+        """
+        string
+        """
         self.name = kwargs["config"]["general"]["name"]
         self.logger = logging.getLogger("aspyre").getChild(self.name)
 
     def find_interface(self, interface_name):
+        """
+        string
+        """
         return self._find_interface(interface_name)
 
     def _validate_interface(self, name, data):
+        """
+        string
+        """
         self.logger.debug("Checking out interface {0}.".format(name))
         # For some reason the data we need lives in the "2" section of the interface.
         data_2 = data.get(2)
@@ -90,9 +105,17 @@ class BeaconInterfaceUtility():
             self.logger.debug("Interface {0} is a link-local device.".format(name))
             return None
 
-        return BeaconInterface(interface.ip, interface.network.network_address, interface.network.broadcast_address, name)
+        return BeaconInterface(
+            interface.ip,
+            interface.network.network_address,
+            interface.network.broadcast_address,
+            name
+        )
 
     def _find_interface(self, interface_name):
+        """
+        string
+        """
         netinf = zhelper.get_ifaddrs()
 
         self.logger.debug("Available interfaces: {0}".format(netinf))
@@ -105,8 +128,8 @@ class BeaconInterfaceUtility():
                     valid = self._validate_interface(_name, _data)
                     if valid is not None:
                         return valid
-                    else:
-                        self.logger.error(f"Unable to use interface [{interface_name}]")
+
+                    self.logger.error(f"Unable to use interface [{interface_name}]")
 
         self.logger.warning("Searching for any avilable NIC")
 
@@ -186,14 +209,23 @@ class AspyreAsyncBeaconReceiver():
 
     # by default we are not expecting a curbe public key
     def _unpack_beacon(self, frame):
+        """
+        string
+        """
         return struct.unpack('cccb16sH', frame)
 
     async def _update_peer(self, beacon, addr, peer_id, port):
+        """
+        string
+        """
         _endpoint = "tcp://%s:%d" %(addr[0], port)
         _peer = await self._peers.require_peer(peer_id, _endpoint)
         _peer.refresh()
 
     async def _process_beacon(self, frame, addr):
+        """
+        string
+        """
         _beacon = self._unpack_beacon(frame)
         # Ignore anything that isn't a valid beacon
         if _beacon[3] != BEACON_VERSION:
@@ -231,25 +263,48 @@ class AspyreAsyncBeaconReceiver():
         self._logger.error(f"Connection closed :: {exc}")
 
 class AspyreAsyncBeaconNoEncryptionReceiver(AspyreAsyncBeaconReceiver):
+    """
+    string
+    """
     def __init__(self, name, transmit, peers):
+        """
+        string
+        """
         super().__init__(name, transmit, peers)
 
 class AspyreAsyncBeaconEncryptionReceiver(AspyreAsyncBeaconReceiver):
+    """
+    string
+    """
     def __init__(self, name, transmit, peers):
+        """
+        string
+        """
         super().__init__(name, transmit, peers)
 
     def _unpack_beacon(self, frame):
+        """
+        string
+        """
         return struct.unpack('cccb16sH40s', frame)
 
     async def _update_peer(self, beacon, addr, peer_id, port):
+        """
+        string
+        """
         endpoint = "tcp://%s:%d" %(addr[0], port)
         _server_public_key = beacon[6]
         peer = await self._peers.require_peer(peer_id, endpoint, _server_public_key)
         peer.refresh()
 
 class AspyreAsyncBeacon():
-
+    """
+    string
+    """
     def __init__(self, port, peers, **kwargs):
+        """
+        string
+        """
         self.name = kwargs["config"]["general"]["name"]
         self._identity = kwargs["config"]["general"]["identity"]
         self.logger = logging.getLogger("aspyre").getChild(self.name)
@@ -275,28 +330,40 @@ class AspyreAsyncBeacon():
         self.broadcast_address = None
 
     def _build_beacon(self):
+        """
+        string
+        """
         return struct.pack('cccb16sH', b'Z', b'R', b'E',
-                            BEACON_VERSION, self._identity.bytes,
-                            socket.htons(self._port))
+                           BEACON_VERSION, self._identity.bytes,
+                           socket.htons(self._port))
 
     def _build_zeroized_beacon(self):
+        """
+        string
+        """
         return struct.pack('cccb16sH', b'Z', b'R', b'E',
-                            BEACON_VERSION, self._identity.bytes,
-                            socket.htons(0))
+                           BEACON_VERSION, self._identity.bytes,
+                           socket.htons(0))
 
     def _build_beacon_receiver(self, transmit):
+        """
+        string
+        """
         return AspyreAsyncBeaconReceiver(self.name, transmit, self._peers)
 
     async def run(self, interface):
+        """
+        string
+        """
         self.start(interface)
         try:
             _transmit = self._build_beacon()
-    
-            _beaconReceiver = self._build_beacon_receiver(_transmit)
+
+            _beacon_receiver = self._build_beacon_receiver(_transmit)
 
             # this will receive asynchronously on its own
             _transport, _protocol = await asyncio.get_event_loop().create_datagram_endpoint(
-                lambda: _beaconReceiver,
+                lambda: _beacon_receiver,
                 sock=self.udpsock)
 
             while not self._terminated:
@@ -310,17 +377,26 @@ class AspyreAsyncBeacon():
             # we still want to force out one last beacon to inform peers
             # we are leaving
             _transmit = self._build_zeroized_beacon()
-            _beaconReceiver.transmit = _transmit
+            _beacon_receiver.transmit = _transmit
             await self.send_beacon(interface, _transport, _transmit)
             self.udpsock.close()
 
     def start(self, interface):
+        """
+        string
+        """
         self._bind_interface(interface)
 
     def stop(self):
+        """
+        string
+        """
         self._terminated = True
 
     def _bind_interface(self, interface):
+        """
+        string
+        """
         try:
             self.udpsock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             self.udpsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -349,7 +425,8 @@ class AspyreAsyncBeacon():
                 #
                 # this results in the loopback address?
                 # host = socket.gethostbyname(socket.gethostname())
-                # self.udpsock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(host))
+                # self.udpsock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF,
+                # socket.inet_aton(host))
                 # You need to tell the kernel which multicast groups
                 # you are interested in. If no process is interested
                 # in a group, packets destined to it that arrive to
@@ -379,11 +456,19 @@ class AspyreAsyncBeacon():
                 else:
                     self.udpsock.bind(("", self.port_nbr))
 
-                self.logger.debug("Set up a broadcast beacon to {0}:{1}".format(interface.broadcast_address, self.port_nbr))
+                self.logger.debug("Set up a broadcast beacon to {0}:{1}".format(
+                    interface.broadcast_address,
+                    self.port_nbr
+                ))
         except socket.error:
-            self.logger.exception("Initializing of {0} raised an exception".format(self.__class__.__name__))
+            self.logger.exception("Initializing of {0} raised an exception".format(
+                self.__class__.__name__
+            ))
 
     async def send_beacon(self, interface, transport, data):
+        """
+        string
+        """
         self.logger.debug(f"Send beacon [{data}] from [{(str(interface.broadcast_address), self.port_nbr)}]")
         try:
             transport.sendto(data, (str(interface.broadcast_address), self.port_nbr))
@@ -399,34 +484,55 @@ class AspyreAsyncBeacon():
             else:
                 self.logger.debug("Network seems gone, exiting zbeacon")
                 self._terminated = True
-    
+
         except socket.error:
             self.logger.debug("Network seems gone, exiting zbeacon")
             self._terminated = True
 
 class AspyreAsyncBeaconPlainText(AspyreAsyncBeacon):
+    """
+    string
+    """
     def __init__(self, port, peers, **kwargs):
+        """
+        string
+        """
         super().__init__(port, peers, **kwargs)
 
 class AspyreAsyncBeaconEncrypted(AspyreAsyncBeacon):
+    """
+    string
+    """
     def __init__(self, port, peers, **kwargs):
+        """
+        string
+        """
         super().__init__(port, peers, **kwargs)
         self._server_secret_file = kwargs["config"]["authentication"]["server_secret_file"]
 
     def _build_beacon(self):
+        """
+        string
+        """
         _server_public, _ = zmq.auth.load_certificate(self._server_secret_file)
         return struct.pack('cccb16sH40s', b'Z', b'R', b'E',
-                            BEACON_VERSION, self._identity.bytes,
-                            socket.htons(self._port),
-                            _server_public)
+                           BEACON_VERSION, self._identity.bytes,
+                           socket.htons(self._port),
+                           _server_public)
 
     def _build_zeroized_beacon(self):
+        """
+        string
+        """
         _server_public, _ = zmq.auth.load_certificate(self._server_secret_file)
         return struct.pack('cccb16sH40s', b'Z', b'R', b'E',
-                            BEACON_VERSION, self._identity.bytes,
-                            socket.htons(0),
-                            _server_public)
+                           BEACON_VERSION, self._identity.bytes,
+                           socket.htons(0),
+                           _server_public)
 
     def _build_beacon_receiver(self, transmit):
+        """
+        string
+        """
         return AspyreAsyncBeaconEncryptionReceiver(self.name, transmit, self._peers)
     
