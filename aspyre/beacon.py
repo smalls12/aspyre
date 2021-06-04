@@ -56,10 +56,10 @@ class BeaconInterfaceUtility():
     def __init__(self, **kwargs):
         self.name = kwargs["config"]["general"]["name"]
         self.logger = logging.getLogger("aspyre").getChild(self.name)
-    
+
     def find_interface(self, interface_name):
         return self._find_interface(interface_name)
-    
+
     def _validate_interface(self, name, data):
         self.logger.debug("Checking out interface {0}.".format(name))
         # For some reason the data we need lives in the "2" section of the interface.
@@ -107,7 +107,7 @@ class BeaconInterfaceUtility():
                         return valid
                     else:
                         self.logger.error(f"Unable to use interface [{interface_name}]")
-        
+
         self.logger.warning("Searching for any avilable NIC")
 
         # just find any available interface
@@ -117,7 +117,7 @@ class BeaconInterfaceUtility():
             for name, data in iface.items():
                 if self._validate_interface(name, data):
                     return
-        
+
         raise Exception("No avilable NICs")
 
 class AspyreAsyncBeaconReceiver():
@@ -141,7 +141,7 @@ class AspyreAsyncBeaconReceiver():
         string
         """
         self._logger.debug("connection made")
-    
+
     @property
     def transmit(self):
         """
@@ -149,7 +149,7 @@ class AspyreAsyncBeaconReceiver():
         that we can set it to the zeroized beacon
         """
         return self._transmit
-    
+
     @transmit.setter
     def transmit(self, transmit):
         """
@@ -161,7 +161,7 @@ class AspyreAsyncBeaconReceiver():
     def datagram_received(self, frame, addr):
         """
         string
-        """       
+        """
         #  If filter is set, check that beacon matches it
         is_valid = False
         if self._filter is not None:
@@ -183,11 +183,11 @@ class AspyreAsyncBeaconReceiver():
             # it doesn't have the async wrapping
             # we'll need to throw this at asyncio to get a task
             asyncio.create_task(self._process_beacon(frame, addr))
-    
+
     # by default we are not expecting a curbe public key
     def _unpack_beacon(self, frame):
         return struct.unpack('cccb16sH', frame)
-    
+
     async def _update_peer(self, beacon, addr, peer_id, port):
         _endpoint = "tcp://%s:%d" %(addr[0], port)
         _peer = await self._peers.require_peer(peer_id, _endpoint)
@@ -217,7 +217,7 @@ class AspyreAsyncBeaconReceiver():
             else:
                 self._logger.warning(self._peers)
                 self._logger.warning("We don't know peer id {0}".format(_peer_id))
-    
+
     def error_received(self, exc):
         """
         string
@@ -237,10 +237,10 @@ class AspyreAsyncBeaconNoEncryptionReceiver(AspyreAsyncBeaconReceiver):
 class AspyreAsyncBeaconEncryptionReceiver(AspyreAsyncBeaconReceiver):
     def __init__(self, name, transmit, peers):
         super().__init__(name, transmit, peers)
-    
+
     def _unpack_beacon(self, frame):
         return struct.unpack('cccb16sH40s', frame)
-    
+
     async def _update_peer(self, beacon, addr, peer_id, port):
         endpoint = "tcp://%s:%d" %(addr[0], port)
         _server_public_key = beacon[6]
@@ -273,32 +273,32 @@ class AspyreAsyncBeacon():
         self.address = None
         self.network_address = None
         self.broadcast_address = None
-    
+
     def _build_beacon(self):
         return struct.pack('cccb16sH', b'Z', b'R', b'E',
-                                     BEACON_VERSION, self._identity.bytes,
-                                     socket.htons(self._port))
+                            BEACON_VERSION, self._identity.bytes,
+                            socket.htons(self._port))
 
     def _build_zeroized_beacon(self):
         return struct.pack('cccb16sH', b'Z', b'R', b'E',
-                                        BEACON_VERSION, self._identity.bytes,
-                                        socket.htons(0))
-    
+                            BEACON_VERSION, self._identity.bytes,
+                            socket.htons(0))
+
     def _build_beacon_receiver(self, transmit):
         return AspyreAsyncBeaconReceiver(self.name, transmit, self._peers)
-    
+
     async def run(self, interface):
         self.start(interface)
         try:
             _transmit = self._build_beacon()
-            
+    
             _beaconReceiver = self._build_beacon_receiver(_transmit)
-            
+
             # this will receive asynchronously on its own
             _transport, _protocol = await asyncio.get_event_loop().create_datagram_endpoint(
                 lambda: _beaconReceiver,
                 sock=self.udpsock)
-            
+
             while not self._terminated:
                 # keep looping
                 # send the beacon at interval
@@ -313,13 +313,13 @@ class AspyreAsyncBeacon():
             _beaconReceiver.transmit = _transmit
             await self.send_beacon(interface, _transport, _transmit)
             self.udpsock.close()
-    
+
     def start(self, interface):
         self._bind_interface(interface)
 
     def stop(self):
         self._terminated = True
-    
+
     def _bind_interface(self, interface):
         try:
             self.udpsock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -382,24 +382,24 @@ class AspyreAsyncBeacon():
                 self.logger.debug("Set up a broadcast beacon to {0}:{1}".format(interface.broadcast_address, self.port_nbr))
         except socket.error:
             self.logger.exception("Initializing of {0} raised an exception".format(self.__class__.__name__))
-    
+
     async def send_beacon(self, interface, transport, data):
         self.logger.debug(f"Send beacon [{data}] from [{(str(interface.broadcast_address), self.port_nbr)}]")
         try:
             transport.sendto(data, (str(interface.broadcast_address), self.port_nbr))
         except OSError as e:
-            
+
             # network down, just wait, it could come back up again.
             # socket call errors 50 and 51 relate to the network being
-            # down or unreachable, the recommended action to take is to 
+            # down or unreachable, the recommended action to take is to
             # try again so we don't terminate in these cases.
             if e.errno in [ENETDOWN, ENETUNREACH]: pass
-            
+
             # all other cases, we'll terminate
             else:
                 self.logger.debug("Network seems gone, exiting zbeacon")
                 self._terminated = True
-                
+    
         except socket.error:
             self.logger.debug("Network seems gone, exiting zbeacon")
             self._terminated = True
@@ -412,21 +412,21 @@ class AspyreAsyncBeaconEncrypted(AspyreAsyncBeacon):
     def __init__(self, port, peers, **kwargs):
         super().__init__(port, peers, **kwargs)
         self._server_secret_file = kwargs["config"]["authentication"]["server_secret_file"]
-    
+
     def _build_beacon(self):
         _server_public, _ = zmq.auth.load_certificate(self._server_secret_file)
         return struct.pack('cccb16sH40s', b'Z', b'R', b'E',
-                                     BEACON_VERSION, self._identity.bytes,
-                                     socket.htons(self._port),
-                                     _server_public)
+                            BEACON_VERSION, self._identity.bytes,
+                            socket.htons(self._port),
+                            _server_public)
 
     def _build_zeroized_beacon(self):
         _server_public, _ = zmq.auth.load_certificate(self._server_secret_file)
         return struct.pack('cccb16sH40s', b'Z', b'R', b'E',
-                                        BEACON_VERSION, self._identity.bytes,
-                                        socket.htons(0),
-                                        _server_public)
-    
+                            BEACON_VERSION, self._identity.bytes,
+                            socket.htons(0),
+                            _server_public)
+
     def _build_beacon_receiver(self, transmit):
         return AspyreAsyncBeaconEncryptionReceiver(self.name, transmit, self._peers)
     

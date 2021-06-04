@@ -1,3 +1,7 @@
+"""
+encapsulates the different authentication methods of aspyre
+"""
+
 import zmq
 from zmq.auth.asyncio import AsyncioAuthenticator
 

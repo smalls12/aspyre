@@ -12,7 +12,6 @@ from zmq.asyncio import Context
 from .database import PeerDatabase, PeerDatabaseEncrypted, GroupDatabase
 
 from .authentication import AspyreAuthenticationContext
-from .authentication import AspyreClientNoAuthentication, AspyreServerNoAuthentication
 from .authentication import AspyreClientCurveAuthentication, AspyreServerCurveAuthentication
 
 from .factory import ClientSocketFactory, ServerSocketFactory
@@ -76,11 +75,12 @@ class AspyreImpl():
                 self._config["config"]["beacon"][_name] = _data
         except KeyError:
             pass
-
-        self._config["config"]["general"]["identity"] = uuid.uuid4()
+        
+        self._identity = uuid.uuid4()
+        self._config["config"]["general"]["identity"] = self._identity
 
         if self._config["config"]["general"]["name"] is None:
-            self._config["config"]["general"]["name"] = str(self._config["config"]["general"]["identity"])[:6]
+            self._config["config"]["general"]["name"] = str(self._identity)[:6]
 
         self._logger = logging.getLogger("aspyre").getChild(self._config["config"]["general"]["name"])
 
@@ -137,8 +137,8 @@ class AspyreImpl():
         responsible for starting the asynchronous engine
         """
         # check for interface
-        _beaconInterfaceUtility = BeaconInterfaceUtility(**self._config)
-        self._interface = _beaconInterfaceUtility.find_interface(self._config["config"]["beacon"]["interface_name"])
+        _beacon_interface_utility = BeaconInterfaceUtility(**self._config)
+        self._interface = _beacon_interface_utility.find_interface(self._config["config"]["beacon"]["interface_name"])
 
         self.start()
 
@@ -157,7 +157,7 @@ class AspyreImpl():
         )
 
         return _server_factory, _client_factory
-    
+
     def _setup_peer_database(self, factory, endpoint):
         # build peer database
         return PeerDatabase(
@@ -196,11 +196,11 @@ class AspyreImpl():
 
         # build node outbox
         self._outbox = self._config["config"]["general"]["ctx"].socket(zmq.PUSH)
-        self._outbox.bind("inproc://events-{}".format(self._config["config"]["general"]["identity"]))
+        self._outbox.bind("inproc://events-{}".format(self._identity))
 
         # build node inbox
         self._inbox = self._config["config"]["general"]["ctx"].socket(zmq.PULL)
-        self._inbox.connect("inproc://events-{}".format(self._config["config"]["general"]["identity"]))
+        self._inbox.connect("inproc://events-{}".format(self._identity))
 
         # build database of groups we belong to
         self._own_groups = GroupDatabase(
@@ -258,7 +258,7 @@ class AspyreImpl():
         if self._running:
             await self._node.stop()
             await self._running_task
-            self._inbox.disconnect("inproc://events-{}".format(self._config["config"]["general"]["identity"]))
+            self._inbox.disconnect("inproc://events-{}".format(self._identity))
 
     async def listen(self, receiver):
         """
@@ -274,7 +274,7 @@ class AspyreImpl():
                 await receiver(self, await self.recv())
             except asyncio.TimeoutError:
                 pass
-    
+
     def stop_listening(self):
         """
         this will cause any current ::listen calls to end
@@ -314,11 +314,11 @@ class AspyreImpl():
 
     def peers_by_group(self, groupname):
         """Return list of current peer ids."""
-        return list(self._node._peer_groups[groupname].peers.keys())
+        return list(self._peer_groups[groupname].peers.keys())
 
     def endpoint(self):
         """Return own endpoint"""
-        return self._node.endpoint
+        return self._node._endpoint
 
     def peer_address(self, peer):
         """Return the endpoint of a connected peer."""
@@ -340,7 +340,7 @@ class AspyreImpl():
 
     def peer_groups(self):
         """Return list of groups known through connected peers."""
-        return list(self.peer_groups.groups.keys())
+        return list(self._peer_groups.groups.keys())
 
 class Aspyre(AspyreImpl):
     """
@@ -356,7 +356,7 @@ class AspyreEncrypted(AspyreImpl):
     def __init__(self, authentication, **kwargs):
         super().__init__(**kwargs)
         self._config["config"]["authentication"] = authentication
-    
+
     def _setup_socket_factories(self):
         _authentication_context = AspyreAuthenticationContext(
             self._config["config"]["general"]["ctx"],
@@ -385,7 +385,7 @@ class AspyreEncrypted(AspyreImpl):
         )
 
         return _server_factory, _client_factory
-    
+
     def _setup_peer_database(self, factory, endpoint):
         # build peer database
         return PeerDatabaseEncrypted(
