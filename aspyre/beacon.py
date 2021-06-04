@@ -225,7 +225,12 @@ class AspyreAsyncBeaconReceiver():
         """
         string
         """
-        _beacon = self._unpack_beacon(frame)
+        try:
+            _beacon = self._unpack_beacon(frame)
+        except struct.error as e:
+            self._logger.error("Unable to unpack the beacon")
+            return
+        
         # Ignore anything that isn't a valid beacon
         if _beacon[3] != BEACON_VERSION:
             self._logger.warning("Invalid ZRE Beacon version: {0}".format(_beacon[3]))
