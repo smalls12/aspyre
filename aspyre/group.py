@@ -50,5 +50,5 @@ class PyreGroup():
         """
         string
         """
-        for p in self.peers.values():
-            await p.send(msg)
+        for _peer in self.peers.values():
+            await _peer.send(msg)

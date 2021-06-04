@@ -2,20 +2,12 @@
 string
 """
 
-import uuid
 import logging
-import struct
-import socket
-import time
-import json
 import asyncio
 
 import zmq.asyncio
-from zmq.asyncio import Context
 
-from .zbeacon import AspyreAsyncBeacon
 from .message import ZreMsg
-from .peer import AspyrePeer
 from .group import PyreGroup
 
 # hmm ?
@@ -35,34 +27,34 @@ class AspyreAsyncNode():
         """
         self._ctx = kwargs["config"]["general"]["ctx"]
 
-        self._terminated = False                    # API shut us down
+        self._terminated = False
 
         self._beacon_interface_name = kwargs["config"]["beacon"]["interface_name"]
-        self._beacon = beacon                          # Beacon actor
+        self._beacon = beacon
         self._beacon_receiver = None
 
         self._transmit = None
         self._filter = b""
 
-        self._identity = kwargs["config"]["general"]["identity"]                    # Our UUID as object
-        self._name = kwargs["config"]["general"]["name"]                            # Our public name (default=first 6 uuid chars)
+        self._identity = kwargs["config"]["general"]["identity"]
+        self._name = kwargs["config"]["general"]["name"]
         self._logger = logging.getLogger("aspyre").getChild(self._name)
 
         self._router = router
-        self._endpoint = ""                          # Our public endpoint
-        self._port = 0                               # Our inbox port, if any
+        self._endpoint = ""
+        self._port = 0
 
         self._reaper = reaper
 
         self._outbox = mailbox
 
-        self._status = 0                             # Our own change counter
+        self._status = 0
 
-        self._own_groups = own_groups                        # Groups that we are in
-        self._peers = peers                             # Hash of known peers, fast lookup
-        self._peer_groups = peer_groups                       # Groups that our peers are in
-        
-        self._headers = {}                           # Our header values
+        self._own_groups = own_groups
+        self._peers = peers
+        self._peer_groups = peer_groups
+
+        self._headers = {}
 
     async def run(self, interface):
         """
@@ -84,7 +76,7 @@ class AspyreAsyncNode():
             await asyncio.gather(*tasks)
         finally:
             pass
-    
+
     async def stop(self):
         """
         string
@@ -97,21 +89,6 @@ class AspyreAsyncNode():
         self._beacon.stop()
         self._reaper.stop()
         self._router.stop()
-        
-        # # close beacon socket
-        # self._beacon = None
-
-        # try:
-        #     self._outbox.unbind(f"inproc://events-{self._identity}")
-        # except zmq.error.ZMQError as e:
-        #     pass
-        # finally:
-        #     self._outbox.close()
-
-        # # additional cleanup
-        # self._peers = None
-        # self._peer_groups = None
-        # self._own_groups = None
 
     async def join(self, groupname):
         """

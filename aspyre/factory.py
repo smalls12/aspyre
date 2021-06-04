@@ -1,7 +1,9 @@
+"""
+string
+"""
+
 import zmq
 
-# ---------------------------------------------------
-# 
 class SocketFactoryImpl():
     """
     string
@@ -18,8 +20,6 @@ class SocketFactoryImpl():
         """
         return self._context.socket(type)
 
-# ---------------------------------------------------
-#
 class SocketFactory(SocketFactoryImpl):
     """
     string
@@ -62,8 +62,6 @@ class ClientSocketFactory(SocketFactory):
         """
         return super().get_socket(zmq.DEALER)
 
-# ---------------------------------------------------
-#
 class EncryptedSocketFactory(SocketFactoryImpl):
     """
     string
