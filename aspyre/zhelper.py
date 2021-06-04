@@ -1,11 +1,6 @@
-import os
-import random
-import sys
-
-try:
-    u = unicode
-except NameError:
-    u = str
+"""
+string
+"""
 
 from ctypes import c_char, c_char_p
 from ctypes import c_uint, c_uint8, c_uint16, c_uint32
@@ -14,13 +9,23 @@ from ctypes import c_void_p, pointer
 from ctypes import CDLL, Structure, Union
 
 from sys import platform
-if platform.startswith("win") and sys.version.startswith("2"):
-    import win_inet_pton
-from socket import AF_INET, AF_INET6, inet_ntop
+
 try:
     from socket import AF_PACKET
 except ImportError:
     AF_PACKET = -1
+
+from socket import AF_INET, AF_INET6, inet_ntop
+
+import sys
+
+try:
+    u = unicode
+except NameError:
+    u = str
+
+if platform.startswith("win") and sys.version.startswith("2"):
+    import win_inet_pton
 
 if platform.startswith("darwin") or platform.startswith("freebsd"):
     AF_LINK = 18
@@ -52,12 +57,18 @@ def get_ifaddrs():
 
     # getifaddr structs
     class ifa_ifu_u(Union):
+        """
+        string
+        """
         _fields_ = [
             ("ifu_broadaddr", c_void_p),
             ("ifu_dstaddr", c_void_p)
         ]
 
     class ifaddrs(Structure):
+        """
+        string
+        """
         _fields_ = [
             ("ifa_next", c_void_p),
             ("ifa_name", c_char_p),
@@ -71,6 +82,9 @@ def get_ifaddrs():
     # AF_UNKNOWN / generic
     if platform.startswith("darwin") or platform.startswith("freebsd"):
         class sockaddr(Structure):
+            """
+            string
+            """
             _fields_ = [
                 ("sa_len", c_uint8),
                 ("sa_family", c_uint8),
@@ -79,6 +93,9 @@ def get_ifaddrs():
 
     else:
         class sockaddr(Structure):
+            """
+            string
+            """
             _fields_ = [
                 ("sa_family", c_uint16),
                 ("sa_data", (c_uint8 * 14))
@@ -86,12 +103,18 @@ def get_ifaddrs():
 
     # AF_INET / IPv4
     class in_addr(Union):
+        """
+        string
+        """
         _fields_ = [
             ("s_addr", c_uint32),
         ]
 
     if platform.startswith("darwin") or platform.startswith("freebsd"):
         class sockaddr_in(Structure):
+            """
+            string
+            """
             _fields_ = [
                 ("sin_len", c_uint8),
                 ("sin_family", c_uint8),
@@ -101,15 +124,21 @@ def get_ifaddrs():
             ]
     else:
         class sockaddr_in(Structure):
+            """
+            string
+            """
             _fields_ = [
                 ("sin_family", c_short),
                 ("sin_port", c_ushort),
                 ("sin_addr", in_addr),
-                ("sin_zero",  (c_char * 8))  # padding
+                ("sin_zero", (c_char * 8))  # padding
             ]
 
     # AF_INET6 / IPv6
     class in6_u(Union):
+        """
+        string
+        """
         _fields_ = [
             ("u6_addr8", (c_uint8 * 16)),
             ("u6_addr16", (c_uint16 * 8)),
@@ -117,12 +146,18 @@ def get_ifaddrs():
         ]
 
     class in6_addr(Union):
+        """
+        string
+        """
         _fields_ = [
             ("in6_u", in6_u),
         ]
 
     if platform.startswith("darwin") or platform.startswith("freebsd"):
         class sockaddr_in6(Structure):
+            """
+            string
+            """
             _fields_ = [
                 ("sin6_len", c_uint8),
                 ("sin6_family", c_uint8),
@@ -133,6 +168,9 @@ def get_ifaddrs():
             ]
     else:
         class sockaddr_in6(Structure):
+            """
+            string
+            """
             _fields_ = [
                 ("sin6_family", c_short),
                 ("sin6_port", c_ushort),
@@ -143,6 +181,9 @@ def get_ifaddrs():
 
     # AF_PACKET / Linux
     class sockaddr_ll(Structure):
+        """
+        string
+        """
         _fields_ = [
             ("sll_family", c_uint16),
             ("sll_protocol", c_uint16),
@@ -155,6 +196,9 @@ def get_ifaddrs():
 
     # AF_LINK / BSD|OSX
     class sockaddr_dl(Structure):
+        """
+        string
+        """
         _fields_ = [
             ("sdl_len", c_uint8),
             ("sdl_family", c_uint8),
@@ -191,7 +235,7 @@ def get_ifaddrs():
 
         if ifa.ifa_addr:
             sa = sockaddr.from_address(ifa.ifa_addr)
-        
+
             data = {}
 
             if sa.sa_family == AF_INET:
@@ -253,7 +297,7 @@ def get_ifaddrs():
                 if iface:
                     iface[name][sa.sa_family] = data
                 else:
-                    iface[name] = { sa.sa_family : data }
+                    iface[name] = {sa.sa_family : data}
                     result.append(iface)
 
         if ifa.ifa_next:
@@ -281,13 +325,13 @@ def get_win_ifaddrs():
     import ctypes.wintypes
     from ctypes.wintypes import DWORD, WCHAR, BYTE, BOOL
     from socket import AF_INET
-    
+
     # from iptypes.h
     MAX_ADAPTER_ADDRESS_LENGTH = 8
     MAX_DHCPV6_DUID_LENGTH = 130
 
     GAA_FLAG_INCLUDE_PREFIX = ctypes.c_ulong(0x0010)
-    
+
     class in_addr(Structure):
         _fields_ = [("byte", ctypes.c_ubyte * 4)]
 
@@ -339,18 +383,18 @@ def get_win_ifaddrs():
         pass
     PIP_ADAPTER_UNICAST_ADDRESS = ctypes.POINTER(IP_ADAPTER_UNICAST_ADDRESS)
     IP_ADAPTER_UNICAST_ADDRESS._fields_ = [
-            ("length", ctypes.c_ulong),
-            ("flags", DWORD),
-            ("next", PIP_ADAPTER_UNICAST_ADDRESS),
-            ("address", SOCKET_ADDRESS),
-            ("prefix_origin", ctypes.c_int),
-            ("suffix_origin", ctypes.c_int),
-            ("dad_state", ctypes.c_int),
-            ("valid_lifetime", ctypes.c_ulong),
-            ("preferred_lifetime", ctypes.c_ulong),
-            ("lease_lifetime", ctypes.c_ulong),
-            ("on_link_prefix_length", ctypes.c_ubyte)
-            ]
+        ("length", ctypes.c_ulong),
+        ("flags", DWORD),
+        ("next", PIP_ADAPTER_UNICAST_ADDRESS),
+        ("address", SOCKET_ADDRESS),
+        ("prefix_origin", ctypes.c_int),
+        ("suffix_origin", ctypes.c_int),
+        ("dad_state", ctypes.c_int),
+        ("valid_lifetime", ctypes.c_ulong),
+        ("preferred_lifetime", ctypes.c_ulong),
+        ("lease_lifetime", ctypes.c_ulong),
+        ("on_link_prefix_length", ctypes.c_ubyte)
+    ]
 
     class IP_ADAPTER_PREFIX(ctypes.Structure):
         pass
@@ -365,7 +409,7 @@ def get_win_ifaddrs():
     class IP_ADAPTER_ADDRESSES(ctypes.Structure):
         pass
     LP_IP_ADAPTER_ADDRESSES = ctypes.POINTER(IP_ADAPTER_ADDRESSES)
-    
+
     # for now, just use void * for pointers to unused structures
     PIP_ADAPTER_ANYCAST_ADDRESS = ctypes.c_void_p
     PIP_ADAPTER_MULTICAST_ADDRESS = ctypes.c_void_p
@@ -375,7 +419,8 @@ def get_win_ifaddrs():
     PIP_ADAPTER_GATEWAY_ADDRESS_LH = ctypes.c_void_p
     PIP_ADAPTER_DNS_SUFFIX = ctypes.c_void_p
 
-    IF_OPER_STATUS = ctypes.c_uint # this is an enum, consider http://code.activestate.com/recipes/576415/
+    # this is an enum, consider http://code.activestate.com/recipes/576415/
+    IF_OPER_STATUS = ctypes.c_uint
     IF_LUID = ctypes.c_uint64
 
     NET_IF_COMPARTMENT_ID = ctypes.c_uint32
@@ -429,7 +474,7 @@ def get_win_ifaddrs():
         Returns an iteratable list of adapters.
         param:
          - af: the address family to read on
-        """ 
+        """
         size = ctypes.c_ulong()
         AF_UNSPEC = 0
         flags = GAA_FLAG_INCLUDE_PREFIX
@@ -484,7 +529,7 @@ def get_win_ifaddrs():
         data['broadcast'] = "{0}".format(ip_if.network.broadcast_address)
         data['network'] = "{0}".format(ip_if.network.network_address)
 
-        name = i.description 
+        name = i.description
         #result[i.description] = { ad.family : d}
         iface = {}
         for interface in result:
@@ -494,8 +539,7 @@ def get_win_ifaddrs():
         if iface:
             iface[name][ad.si_family] = data
         else:
-            iface[name] = { ad.si_family : data }
+            iface[name] = {ad.si_family : data}
             result.append(iface)
 
     return result
-

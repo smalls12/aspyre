@@ -32,7 +32,6 @@ import asyncio
 from . import zhelper
 from .zhelper import u
 
-
 import zmq
 
 BEACON_VERSION = 1
